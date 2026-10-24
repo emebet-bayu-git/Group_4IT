@@ -11,12 +11,28 @@ import RegisterStudent from './components/RegisterStudent.jsx'
 import StudentList from './components/StudentList.jsx'
 import ReportCardView from './components/ReportCardView.jsx'
 import TranscriptView from './components/TranscriptView.jsx'
+import HomePage from './components/HomePage.jsx'
+import AboutPage from './components/AboutPage.jsx'
+import ContactPage from './components/ContactPage.jsx'
+import LoginPage, { storeSessionToken } from './components/LoginPage.jsx'
 
 export default function App() {
   const [role, setRole] = useState('Admin')
   const [modalOpen, setModalOpen] = useState(false)
   const [studentView, setStudentView] = useState('directory')
   const [studentDocument, setStudentDocument] = useState(null)
+  const [showPortal, setShowPortal] = useState(false)
+  const [publicView, setPublicView] = useState('home')
+  const openLogin = () => setPublicView('login')
+  const completeLogin = (credentials) => {
+    setRole(credentials.role)
+    setShowPortal(true)
+    return { token: 'demo-jwt-token', role: credentials.role }
+  }
+  if (!showPortal && publicView === 'login') return <LoginPage onBack={() => setPublicView('home')} onLogin={completeLogin} />
+  if (!showPortal && publicView === 'about') return <AboutPage onHome={() => setPublicView('home')} onPortal={openLogin} />
+  if (!showPortal && publicView === 'contact') return <ContactPage onHome={() => setPublicView('home')} onAbout={() => setPublicView('about')} onPortal={openLogin} />
+  if (!showPortal) return <HomePage onAccessPortal={openLogin} onAbout={() => setPublicView('about')} onContact={() => setPublicView('contact')} />
   return (
     <DashboardLayout role={role} onLogout={() => window.alert('Logout requested')}>
       <div className="mb-4 flex justify-end">
