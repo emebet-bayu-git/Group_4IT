@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-slate-200; }
+  body { @apply m-0 bg-slate-50 font-sans text-slate-900 antialiased; }
+  button, input, select, textarea { font: inherit; }
+}
+
+@layer utilities {
+  .scrollbar-subtle { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+}
+
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: white !important; }
+  aside, header, nav, .report-actions { display: none !important; }
+  main, main > div { margin: 0 !important; padding: 0 !important; max-width: none !important; }
+  .report-document { box-shadow: none !important; padding: 0 !important; }
+  * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
