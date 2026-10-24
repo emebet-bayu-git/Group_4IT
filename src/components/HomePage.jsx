@@ -1,47 +1,101 @@
-import React, { useState } from 'react'
-import { ArrowRight, BarChart3, BookOpenCheck, ChevronRight, GraduationCap, LockKeyhole, Menu, ShieldCheck, Users, X } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import axios from 'axios'
+import { Menu, X } from 'lucide-react'
+import HeroCarousel from './HeroCarousel.jsx'
 
-const features = [
-  { icon: LockKeyhole, title: 'Secure student records', description: 'Keep admissions, guardians, documents, and academic history protected with audit-ready access controls.' },
-  { icon: BarChart3, title: 'Real-time grade tracking', description: 'Teachers enter results while administrators and families see accurate academic progress as it is published.' },
-  { icon: BookOpenCheck, title: 'Instant PDF report cards', description: 'Generate consistent, school-branded result cards and transcripts with a single controlled action.' },
-  { icon: ShieldCheck, title: 'Role-based security', description: 'Give every administrator, teacher, registrar, and student exactly the permissions their work requires.' },
-]
-
-const stats = [
-  ['1,248+', 'Active students'], ['64', 'Qualified teachers'], ['42', 'Active classes'], ['99.9%', 'Platform uptime'],
+const fallbackImages = [
+  { id: 1, imageUrl: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=1200&auto=format&fit=crop', title: 'Flag Raising Ceremony' },
+  { id: 2, imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?q=80&w=1200&auto=format&fit=crop', title: 'Morning Assembly' },
+  { id: 3, imageUrl: data:image/webp;base64,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', title: 'Campus Life' },
 ]
 
 export default function HomePage({ onAccessPortal, onAbout, onContact }) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const scrollTo = (id) => { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }); setMenuOpen(false) }
+  const [homeImages, setHomeImages] = useState(fallbackImages)
+
+  useEffect(() => {
+    let ignore = false
+    axios.get('/api/home-images')
+      .then(({ data }) => {
+        const images = Array.isArray(data) ? data : data.items || []
+        if (!ignore && images.length) setHomeImages(images)
+      })
+      .catch((error) => console.error('Unable to load home images:', error.message))
+    return () => { ignore = true }
+  }, [])
+
+  const scrollToHome = () => {
+    document.getElementById('home')?.scrollIntoView({ behavior: 'smooth' })
+    setMenuOpen(false)
+  }
+
+  const navigate = (handler) => {
+    setMenuOpen(false)
+    handler?.()
+  }
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <button onClick={() => scrollTo('home')} className="flex items-center gap-3 text-left" aria-label="Northfield home"><span className="grid h-10 w-10 place-items-center rounded-md bg-primary-900 text-white"><GraduationCap className="h-6 w-6" /></span><span><span className="block text-sm font-bold text-slate-900">Northfield</span><span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Secondary School</span></span></button>
-          <nav className="hidden items-center gap-7 md:flex" aria-label="Primary navigation"><button onClick={() => scrollTo('home')} className="text-sm font-semibold text-primary-800">Home</button><button onClick={onAbout} className="text-sm font-semibold text-slate-600 hover:text-primary-800">About</button><button onClick={onContact} className="text-sm font-semibold text-slate-600 hover:text-primary-800">Contact</button></nav>
-          <div className="hidden md:block"><button onClick={onAccessPortal} className="h-10 rounded-md bg-primary-900 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-primary-800">Login</button></div>
-          <button onClick={() => setMenuOpen(!menuOpen)} className="rounded-md p-2 text-slate-600 hover:bg-slate-100 md:hidden" aria-label="Toggle navigation">{menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      <nav className="relative z-20 flex items-center justify-between bg-slate-900 px-6 py-4 text-white shadow-md" aria-label="Main navigation">
+        <button onClick={scrollToHome} className="text-left text-xl font-bold tracking-wide">
+          Northfield Secondary School
+        </button>
+        <div className="hidden items-center gap-6 text-sm font-medium md:flex">
+          <button onClick={scrollToHome} className="transition hover:text-emerald-400">Home</button>
+          <button onClick={() => navigate(onAbout)} className="transition hover:text-emerald-400">About</button>
+          <button onClick={() => navigate(onContact)} className="transition hover:text-emerald-400">Contact</button>
+          <button onClick={() => navigate(onAccessPortal)} className="rounded-md bg-emerald-600 px-4 py-2 transition hover:bg-emerald-700">Login</button>
         </div>
-        {menuOpen && <div className="border-t border-slate-200 bg-white px-4 py-4 md:hidden"><nav className="flex flex-col gap-1"><button onClick={() => scrollTo('home')} className="rounded-md px-3 py-2 text-left text-sm font-semibold">Home</button><button onClick={onAbout} className="rounded-md px-3 py-2 text-left text-sm font-semibold">About</button><button onClick={onContact} className="rounded-md px-3 py-2 text-left text-sm font-semibold">Contact</button><button onClick={onAccessPortal} className="mt-2 rounded-md bg-primary-900 px-3 py-2.5 text-sm font-bold text-white">Login</button></nav></div>}
+        <button
+          onClick={() => setMenuOpen((open) => !open)}
+          className="rounded-md p-2 transition hover:bg-slate-800 md:hidden"
+          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+        {menuOpen && (
+          <div className="absolute left-0 right-0 top-16 border-t border-slate-700 bg-slate-900 px-6 py-4 md:hidden">
+            <div className="flex flex-col gap-3 text-sm font-medium">
+              <button onClick={scrollToHome} className="py-1 text-left hover:text-emerald-400">Home</button>
+              <button onClick={() => navigate(onAbout)} className="py-1 text-left hover:text-emerald-400">About</button>
+              <button onClick={() => navigate(onContact)} className="py-1 text-left hover:text-emerald-400">Contact</button>
+              <button onClick={() => navigate(onAccessPortal)} className="mt-1 rounded-md bg-emerald-600 px-4 py-2.5 text-left hover:bg-emerald-700">Login</button>
+            </div>
+          </div>
+        )}
+      </nav>
+
+      <header id="home" className="relative h-[450px] w-full overflow-hidden bg-slate-900 shadow-lg md:h-[550px]">
+        <HeroCarousel
+          slides={homeImages.map((image, index) => ({
+            id: image.id ?? index,
+            imageUrl: image.imageUrl || image.image_path,
+            title: image.title,
+            description: image.description,
+          }))}
+          variant="hero"
+        />
       </header>
 
-      <main>
-        <section id="home" className="overflow-hidden bg-slate-25">
-          <div className="mx-auto grid min-h-[620px] max-w-7xl items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8 lg:py-20">
-            <div className="max-w-xl"><span className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-white px-3 py-1.5 text-xs font-bold text-primary-800"><ShieldCheck className="h-3.5 w-3.5" />One secure school management platform</span><h1 className="mt-6 text-4xl font-bold leading-[1.08] text-slate-950 sm:text-5xl lg:text-6xl">Empowering education through <span className="text-primary-700">smart management.</span></h1><p className="mt-6 max-w-lg text-base leading-7 text-slate-600 sm:text-lg">Connect students, teachers, administrators, and families in one dependable system built to simplify every school day.</p><div className="mt-8 flex flex-col gap-3 sm:flex-row"><button onClick={onAccessPortal} className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-primary-900 px-6 text-sm font-bold text-white shadow-panel transition hover:bg-primary-800">Access Portal<ArrowRight className="h-4 w-4" /></button><button onClick={() => scrollTo('about')} className="inline-flex h-12 items-center justify-center rounded-md border border-slate-300 bg-white px-6 text-sm font-bold text-slate-700 hover:bg-slate-50">Learn More</button></div><div className="mt-7 flex items-center gap-4 text-xs font-medium text-slate-500"><span className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-success-600" />Secure access</span><span className="flex items-center gap-1.5"><Users className="h-4 w-4 text-primary-600" />Built for every role</span></div></div>
-            <div className="relative lg:pr-5"><div className="absolute -inset-5 rounded-full bg-primary-100/60 blur-3xl" aria-hidden="true" /><div className="relative overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_24px_70px_-30px_rgba(15,23,42,0.35)]"><div className="flex h-12 items-center gap-2 border-b border-slate-200 bg-slate-50 px-4"><span className="h-2.5 w-2.5 rounded-full bg-danger-500" /><span className="h-2.5 w-2.5 rounded-full bg-warning-500" /><span className="h-2.5 w-2.5 rounded-full bg-success-500" /></div><div className="grid min-h-[390px] grid-cols-[72px_1fr] sm:grid-cols-[150px_1fr]"><aside className="border-r border-slate-200 bg-primary-900 p-3 sm:p-4"><div className="h-8 w-8 rounded-md bg-white/10 sm:h-9 sm:w-full" /><div className="mt-8 space-y-3">{[1,2,3,4,5].map((item) => <div key={item} className="h-7 rounded-md bg-primary-800 sm:h-8" />)}</div></aside><div className="p-4 sm:p-6"><div className="flex items-start justify-between"><div><div className="h-3 w-24 rounded bg-slate-200" /><div className="mt-2 h-7 w-44 rounded bg-slate-800" /></div><div className="h-9 w-9 rounded-full bg-primary-100" /></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">{['1,248','64','42','17'].map((value, index) => <div key={value} className="rounded-md border border-slate-200 p-3"><div className="h-2 w-10 rounded bg-slate-200" /><div className="mt-3 text-lg font-bold text-slate-800">{value}</div><div className={`mt-2 h-1.5 w-full rounded-full ${index === 3 ? 'bg-warning-500' : 'bg-primary-500'}`} /></div>)}</div><div className="mt-4 grid grid-cols-[1fr_130px] gap-3"><div className="rounded-md border border-slate-200 p-4"><div className="h-3 w-28 rounded bg-slate-200" /><div className="mt-5 flex h-28 items-end gap-2">{[38,62,48,80,58,92,70].map((height, index) => <div key={index} className="flex-1 rounded-t-sm bg-primary-600" style={{ height: `${height}%`, opacity: 0.55 + index * 0.06 }} />)}</div></div><div className="hidden rounded-md border border-slate-200 p-4 sm:block"><div className="mx-auto mt-5 h-24 w-24 rounded-full border-[18px] border-primary-700 border-r-success-500" /></div></div></div></div></div></div>
-          </div>
-        </section>
-
-        <section id="about" className="py-20 sm:py-24"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><div className="max-w-2xl"><p className="text-sm font-bold uppercase tracking-wider text-primary-700">Built for better schools</p><h2 className="mt-3 text-3xl font-bold text-slate-950 sm:text-4xl">Every essential operation, connected.</h2><p className="mt-4 text-base leading-7 text-slate-600">Replace fragmented spreadsheets and paper processes with clear workflows that help your school community work with confidence.</p></div><div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-4">{features.map(({ icon: Icon, title, description }) => <article key={title} className="border-t-2 border-primary-800 bg-white py-6 pr-5"><span className="grid h-11 w-11 place-items-center rounded-md bg-primary-50 text-primary-800"><Icon className="h-5 w-5" /></span><h3 className="mt-5 text-lg font-bold text-slate-900">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{description}</p><button onClick={onAccessPortal} className="mt-5 flex items-center gap-1 text-sm font-bold text-primary-700">Explore<ChevronRight className="h-4 w-4" /></button></article>)}</div></div></section>
-
-        <section className="bg-primary-950 py-12"><div className="mx-auto grid max-w-7xl grid-cols-2 divide-x divide-primary-800 px-4 sm:px-6 lg:grid-cols-4 lg:px-8">{stats.map(([value, label]) => <div key={label} className="px-3 py-5 text-center lg:px-8"><p className="text-3xl font-bold text-white sm:text-4xl">{value}</p><p className="mt-2 text-xs font-semibold uppercase tracking-wider text-primary-300 sm:text-sm">{label}</p></div>)}</div></section>
+      <main className="mx-auto flex w-full max-w-7xl flex-grow flex-col items-center px-6 py-12 text-center">
+        <h1 className="mb-4 text-3xl font-extrabold text-slate-800 md:text-4xl">
+          Empowering Education Through Smart Management
+        </h1>
+        <p className="mb-8 max-w-2xl text-slate-600">
+          Welcome to the official student management portal.
+        </p>
+        <button
+          onClick={() => navigate(onAccessPortal)}
+          className="rounded-md bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-700"
+        >
+          Access the school portal
+        </button>
       </main>
 
-      <footer id="contact" className="border-t border-slate-200 bg-slate-50"><div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8"><div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-md bg-primary-900 text-white"><GraduationCap className="h-5 w-5" /></span><div><p className="text-sm font-bold">Northfield Secondary School</p><p className="mt-0.5 text-xs text-slate-500">School management, thoughtfully connected.</p></div></div><nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm font-semibold text-slate-600"><button onClick={() => scrollTo('home')}>Home</button><button onClick={() => scrollTo('about')}>About</button><button onClick={() => scrollTo('contact')}>Contact</button><button onClick={onAccessPortal}>Portal Login</button></nav></div><div className="mt-8 border-t border-slate-200 pt-5 text-xs text-slate-500">© 2026 Northfield Secondary School. All rights reserved.</div></div></footer>
+      <footer className="bg-slate-900 py-6 text-center text-sm text-slate-400">
+        <p>&copy; 2026 Northfield Secondary School. All rights reserved.</p>
+      </footer>
     </div>
   )
 }
