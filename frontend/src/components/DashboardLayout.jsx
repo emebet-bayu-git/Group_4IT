@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import {
   Bell,
+  BadgeCheck,
   BookOpen,
   CalendarDays,
   ChevronDown,
@@ -12,6 +13,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  School,
   Settings,
   Users,
   UserRound,
@@ -19,12 +21,25 @@ import {
 } from 'lucide-react'
 
 export const dashboardMenuByRole = {
+  'Super Admin': [
+    { id: 'schools', label: 'Schools', icon: School },
+    { id: 'all-users', label: 'Register Users', icon: UserRound },
+    { id: 'audit-logs', label: 'System Security & Audit Logs', icon: ClipboardCheck },
+  ],
+  'School Admin': [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'staff-oversight', label: 'School Staff Oversight', icon: UserRound },
+    { id: 'academic-infrastructure', label: 'Academic Infrastructure', icon: BookOpen },
+    { id: 'school-profile', label: 'School Profile & Metadata', icon: Settings },
+    { id: 'staff-registration', label: 'Register Staff', icon: UserRound },
+    { id: 'role-assign', label: 'Role Assign', icon: BadgeCheck },
+    { id: 'student-rosters', label: 'Student Rosters', icon: Users },
+  ],
   Admin: [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'students', label: 'Students', icon: Users },
     { id: 'enrollment', label: 'Student Enrollment', icon: ClipboardCheck },
-    { id: 'users', label: 'User Management', icon: Settings },
-    { id: 'logs', label: 'System Logs', icon: FileText },
+    { id: 'system-access', label: 'System Administration', icon: Settings },
   ],
   Registrar: [
     { id: 'overview', label: 'Student Records', icon: LayoutDashboard },
@@ -34,14 +49,15 @@ export const dashboardMenuByRole = {
   Teacher: [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'grade-entry', label: 'Grade Entry', icon: GraduationCap },
-    { id: 'attendance', label: 'Class Attendance', icon: ClipboardCheck },
     { id: 'roster', label: 'Student Roster', icon: Users },
   ],
+  Headmaster: [{ id: 'overview', label: 'Leadership Overview', icon: LayoutDashboard }],
+  'Vice Principal': [{ id: 'overview', label: 'Leadership Overview', icon: LayoutDashboard }],
+  Supervisor: [{ id: 'overview', label: 'Leadership Overview', icon: LayoutDashboard }],
   Student: [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'grades', label: 'View Grades', icon: GraduationCap },
     { id: 'transcript', label: 'Transcript', icon: FileText },
-    { id: 'attendance', label: 'Attendance Record', icon: ClipboardCheck },
     { id: 'schedule', label: 'Class Schedule', icon: CalendarDays },
   ],
 }
@@ -49,8 +65,8 @@ export const dashboardMenuByRole = {
 export default function DashboardLayout({
   children,
   user,
-  academicYear = '2026/2027',
-  term = 'Term 1',
+  academicYear = 'Academic year not configured',
+  semester = '',
   activeTask = 'overview',
   onNavigate,
   onLogout,
@@ -58,7 +74,7 @@ export default function DashboardLayout({
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const role = user.role
+  const role = user.systemRole || user.role
   const userName = user.name || user.identifier || role
   const items = dashboardMenuByRole[role] ?? []
   const initials = userName
@@ -114,7 +130,7 @@ export default function DashboardLayout({
       {mobileOpen && <><button type="button" className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Close navigation" /><aside className="fixed inset-y-0 left-0 z-50 w-72 bg-primary-900 lg:hidden">{sidebar}</aside></>}
       <div className={`flex min-h-screen min-w-0 flex-1 flex-col transition-[margin] ${collapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm sm:px-6">
-          <div className="flex items-center gap-3"><button className="rounded-md p-2 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button><div><p className="text-xs font-medium text-slate-500">Academic Year</p><p className="text-sm font-bold text-slate-800">{academicYear} · {term}</p></div></div>
+          <div className="flex items-center gap-3"><button className="rounded-md p-2 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button><div><p className="text-xs font-medium text-slate-500">Academic Year · Semester</p><p className="text-sm font-bold text-slate-800">{[academicYear, semester].filter(Boolean).join(' · ')}</p></div></div>
           <div className="flex items-center gap-1 sm:gap-3">
             <button className="relative rounded-md p-2 text-slate-500 hover:bg-slate-100" aria-label="Notifications"><Bell className="h-5 w-5" /><span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger-500 ring-2 ring-white" /></button>
             <div className="relative"><button onClick={() => setProfileOpen(!profileOpen)} className="flex items-center gap-2 rounded-md p-1.5 hover:bg-slate-100" aria-expanded={profileOpen}><div className="grid h-8 w-8 place-items-center rounded-full bg-primary-100 text-xs font-bold text-primary-800">{initials}</div><ChevronDown className="hidden h-4 w-4 text-slate-400 sm:block" /></button>{profileOpen && <div className="absolute right-0 mt-2 w-52 rounded-md border border-slate-200 bg-white p-1.5 shadow-panel"><div className="px-3 py-2"><p className="truncate text-sm font-semibold">{userName}</p><p className="text-xs text-slate-500">{role}</p></div></div>}</div>

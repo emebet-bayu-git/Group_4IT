@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
-import { BookOpen, CalendarCheck, FileText, LockKeyhole, Menu, Users, GraduationCap, X } from 'lucide-react'
+import { BookOpen, CalendarCheck, FileText, LockKeyhole, Users, GraduationCap } from 'lucide-react'
 import HeroCarousel from '../components/HeroCarousel.jsx'
 
 const quickFeatures = [
@@ -36,8 +36,8 @@ const schoolStats = [
 const announcements = [
   {
     date: 'October 26, 2026',
-    title: 'Grade 9–12 Mid-Term Exams',
-    description: 'First semester mid-term assessments for all secondary grade levels begin next Monday.',
+    title: 'Grade 9–12 Mid-Semester Exams',
+    description: 'First semester mid-semester assessments for all secondary grade levels begin next Monday.',
     accentClass: 'border-t-emerald-600',
     dateClass: 'bg-emerald-50 text-emerald-700',
   },
@@ -78,8 +78,7 @@ const fallbackImages = [
   },
 ]
 
-export default function HomePage({ onAccessPortal, onAbout, onContact }) {
-  const [menuOpen, setMenuOpen] = useState(false)
+export default function HomePage() {
   const [homeImages, setHomeImages] = useState(fallbackImages)
 
   useEffect(() => {
@@ -93,61 +92,21 @@ export default function HomePage({ onAccessPortal, onAbout, onContact }) {
     return () => { ignore = true }
   }, [])
 
-  const scrollToHome = () => {
-    document.getElementById('home')?.scrollIntoView({ behavior: 'smooth' })
-    setMenuOpen(false)
-  }
-
-  const navigate = (handler) => {
-    setMenuOpen(false)
-    handler?.()
-  }
-
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
-      <nav className="relative z-20 flex items-center justify-between bg-slate-900 px-6 py-4 text-white shadow-md" aria-label="Main navigation">
-        <button onClick={scrollToHome} className="text-left text-xl font-bold tracking-wide">
-          Northfield Secondary School
-        </button>
-        <div className="hidden items-center gap-6 text-sm font-medium md:flex">
-          <button onClick={scrollToHome} className="transition hover:text-emerald-400">Home</button>
-          <button onClick={() => navigate(onAbout)} className="transition hover:text-emerald-400">About</button>
-          <button onClick={() => navigate(onContact)} className="transition hover:text-emerald-400">Contact</button>
-          <button onClick={() => navigate(onAccessPortal)} className="rounded-md bg-emerald-600 px-4 py-2 transition hover:bg-emerald-700">Login</button>
-        </div>
-        <button
-          onClick={() => setMenuOpen((open) => !open)}
-          className="rounded-md p-2 transition hover:bg-slate-800 md:hidden"
-          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-          aria-expanded={menuOpen}
-        >
-          {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
-        {menuOpen && (
-          <div className="absolute left-0 right-0 top-16 border-t border-slate-700 bg-slate-900 px-6 py-4 md:hidden">
-            <div className="flex flex-col gap-3 text-sm font-medium">
-              <button onClick={scrollToHome} className="py-1 text-left hover:text-emerald-400">Home</button>
-              <button onClick={() => navigate(onAbout)} className="py-1 text-left hover:text-emerald-400">About</button>
-              <button onClick={() => navigate(onContact)} className="py-1 text-left hover:text-emerald-400">Contact</button>
-              <button onClick={() => navigate(onAccessPortal)} className="mt-1 rounded-md bg-emerald-600 px-4 py-2.5 text-left hover:bg-emerald-700">Login</button>
-            </div>
-          </div>
-        )}
-      </nav>
-
-      <header id="home" className="relative h-[450px] w-full overflow-hidden bg-slate-900 shadow-lg md:h-[550px]">
-        <HeroCarousel
-          slides={homeImages.map((image, index) => ({
-            id: image.id ?? index,
-            imageUrl: image.imageUrl || image.image_path,
-            title: image.title,
-            description: image.description,
-          }))}
-          variant="hero"
-        />
-      </header>
-
+    <div id="home" className="flex-1 bg-slate-50">
       <main className="flex-grow">
+        <header className="relative h-[450px] w-full overflow-hidden bg-slate-900 shadow-lg md:h-[550px]">
+          <HeroCarousel
+            slides={homeImages.map((image, index) => ({
+              id: image.id ?? index,
+              imageUrl: image.imageUrl || image.image_path,
+              title: image.title,
+              description: image.description,
+            }))}
+            variant="hero"
+          />
+        </header>
+
         <section className="bg-emerald-700 px-6 py-8 text-white shadow-inner" aria-label="School statistics">
           <div className="mx-auto grid max-w-7xl grid-cols-2 gap-6 text-center md:grid-cols-4">
             {schoolStats.map(({ value, label, icon: Icon }) => (
@@ -198,9 +157,6 @@ export default function HomePage({ onAccessPortal, onAbout, onContact }) {
         </section>
       </main>
 
-      <footer className="bg-slate-900 py-6 text-center text-sm text-slate-400">
-        <p>&copy; 2026 Northfield Secondary School (Grades 9–12) Information Management System. All rights reserved.</p>
-      </footer>
     </div>
   )
 }

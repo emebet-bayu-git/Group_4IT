@@ -1,38 +1,14 @@
 import React from 'react'
-import { ArrowDownRight, ArrowUpRight, BookOpenCheck, ChevronRight, ClipboardCheck, Download, GraduationCap, Megaphone, School, UserPlus, Users, UserRoundCheck } from 'lucide-react'
+import { CalendarDays, ChevronRight, Download, GraduationCap, Megaphone, School, UserPlus, Users, UserRoundCheck } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-const metrics = [
-  { label: 'Total Students', value: '1,248', trend: '+8.2%', direction: 'up', icon: Users, accent: 'bg-primary-50 text-primary-700' },
-  { label: 'Total Teachers', value: '64', trend: '+2.1%', direction: 'up', icon: GraduationCap, accent: 'bg-success-50 text-success-700' },
-  { label: 'Active Classes', value: '42', trend: '+4 this term', direction: 'up', icon: School, accent: 'bg-warning-50 text-warning-700' },
-  { label: 'Pending Grade Approvals', value: '17', trend: '-12.5%', direction: 'down', icon: ClipboardCheck, accent: 'bg-danger-50 text-danger-700' },
-]
-
-const enrollment = [
-  { grade: 'Grade 9', students: 318 },
-  { grade: 'Grade 10', students: 296 },
-  { grade: 'Grade 11', students: 284 },
-  { grade: 'Grade 12', students: 350 },
-]
-
-const genderDistribution = [
-  { name: 'Female', value: 638, color: '#164aaf' },
-  { name: 'Male', value: 610, color: '#10b981' },
-]
+const genderColors = { Female: '#164aaf', Male: '#10b981' }
 
 const actions = [
   { title: 'Register New Student', detail: 'Create an enrollment record', icon: UserPlus, color: 'bg-primary-50 text-primary-700' },
   { title: 'Assign Teacher to Class', detail: 'Manage class allocations', icon: UserRoundCheck, color: 'bg-success-50 text-success-700' },
-  { title: 'Publish Term Results', detail: 'Release approved grades', icon: Megaphone, color: 'bg-warning-50 text-warning-700' },
+  { title: 'Publish Semester Results', detail: 'Release approved grades', icon: Megaphone, color: 'bg-warning-50 text-warning-700' },
   { title: 'Generate Reports', detail: 'Export school summaries', icon: Download, color: 'bg-slate-100 text-slate-700' },
-]
-
-const activity = [
-  { title: 'Grade 11 results published', detail: 'By Rebecca Mensah · 12 minutes ago', icon: BookOpenCheck, color: 'bg-success-100 text-success-700' },
-  { title: '18 students registered', detail: 'Registrar office · 46 minutes ago', icon: UserPlus, color: 'bg-primary-100 text-primary-700' },
-  { title: 'Physics class reassigned', detail: 'By Daniel Owusu · 2 hours ago', icon: School, color: 'bg-warning-100 text-warning-700' },
-  { title: 'October report generated', detail: 'System export · Yesterday', icon: Download, color: 'bg-slate-200 text-slate-700' },
 ]
 
 function ChartTooltip({ active, payload, label }) {
@@ -40,36 +16,48 @@ function ChartTooltip({ active, payload, label }) {
   return <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-panel"><p className="font-semibold text-slate-700">{label || payload[0].name}</p><p className="text-slate-500">{payload[0].value} students</p></div>
 }
 
-export default function AdminDashboard({ onRegisterStudent }) {
+export default function AdminDashboard({ onRegisterStudent, stats, loading = false, error = '' }) {
+  const academicPeriod = stats?.academicPeriod
+  const metricValue = (value) => loading ? '—' : Number(value || 0).toLocaleString()
+  const enrollment = stats?.enrollmentByGrade || []
+  const genderDistribution = (stats?.genderDistribution || []).map((item) => ({
+    ...item,
+    color: genderColors[item.name] || '#64748b',
+  }))
+  const metrics = [
+    { label: 'Total Registered Students', value: metricValue(stats?.totalRegisteredStudents), icon: Users, accent: 'bg-primary-50 text-primary-700' },
+    { label: 'Total Active Teachers', value: metricValue(stats?.totalActiveTeachers), icon: GraduationCap, accent: 'bg-success-50 text-success-700' },
+    { label: 'Active Classes / Sections', value: metricValue(stats?.totalActiveSections), icon: School, accent: 'bg-warning-50 text-warning-700' },
+    { label: 'Current Semester', value: loading ? '—' : academicPeriod?.semester || 'Not configured', detail: academicPeriod?.academicYear || 'No active academic year', icon: CalendarDays, accent: 'bg-danger-50 text-danger-700' },
+  ]
   return (
     <>
       <div className="mb-6">
         <p className="text-sm font-semibold text-primary-700">Administration</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-900">School overview</h1>
-        <p className="mt-1 text-sm text-slate-500">Monday, October 24 · Term 1 performance at a glance</p>
+        <p className="mt-1 text-sm text-slate-500">{academicPeriod?.academicYear ? `${academicPeriod.academicYear}${academicPeriod.semester ? ` · ${academicPeriod.semester}` : ''} performance at a glance` : 'Academic year or semester not configured'}</p>
       </div>
 
+      {error && <p role="alert" className="mb-4 rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700">{error}</p>}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="School metrics">
-        {metrics.map(({ label, value, trend, direction, icon: Icon, accent }) => {
-          const TrendIcon = direction === 'up' ? ArrowUpRight : ArrowDownRight
-          return <article key={label} className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
-            <div className="flex items-start justify-between"><div className={`grid h-10 w-10 place-items-center rounded-md ${accent}`}><Icon className="h-5 w-5" /></div><span className={`flex items-center text-xs font-semibold ${direction === 'up' ? 'text-success-700' : 'text-danger-600'}`}><TrendIcon className="h-4 w-4" />{trend}</span></div>
-            <p className="mt-4 text-sm font-medium text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
-          </article>
-        })}
+        {metrics.map(({ label, value, detail, icon: Icon, accent }) => <article key={label} className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+          <div className={`grid h-10 w-10 place-items-center rounded-md ${accent}`}><Icon className="h-5 w-5" /></div>
+          <p className="mt-4 text-sm font-medium text-slate-500">{label}</p><p className="mt-1 break-words text-2xl font-bold text-slate-900">{value}</p>
+          {detail && <p className="mt-1 text-sm font-medium text-slate-500">{detail}</p>}
+        </article>)}
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-6">
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(240px,1fr)]">
             <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
-              <div className="mb-5"><h2 className="font-bold text-slate-900">Student enrollment</h2><p className="text-sm text-slate-500">Students enrolled by grade level</p></div>
+              <div className="mb-5"><h2 className="font-bold text-slate-900">Student enrollment</h2><p className="text-sm text-slate-500">Active students enrolled by grade level</p></div>
               <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={enrollment} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}><CartesianGrid stroke="#e2e8f0" vertical={false} /><XAxis dataKey="grade" tick={{ fill: '#64748b', fontSize: 12 }} tickLine={false} axisLine={false} /><YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickLine={false} axisLine={false} /><Tooltip content={<ChartTooltip />} cursor={{ fill: '#f1f5f9' }} /><Bar dataKey="students" fill="#164aaf" radius={[4, 4, 0, 0]} maxBarSize={52} /></BarChart></ResponsiveContainer></div>
             </article>
             <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
               <div><h2 className="font-bold text-slate-900">Gender distribution</h2><p className="text-sm text-slate-500">Current student population</p></div>
               <div className="h-56"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={genderDistribution} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={3}>{genderDistribution.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip formatter={(value) => `${value} students`} /></PieChart></ResponsiveContainer></div>
-              <div className="flex justify-center gap-5 text-sm">{genderDistribution.map((item) => <div key={item.name} className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} /><span className="text-slate-600">{item.name}</span></div>)}</div>
+              <div className="flex justify-center gap-5 text-sm">{genderDistribution.map((item) => <div key={item.name} className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} /><span className="text-slate-600">{item.name}: {item.value}</span></div>)}</div>
             </article>
           </div>
 
@@ -81,11 +69,12 @@ export default function AdminDashboard({ onRegisterStudent }) {
           </section>
         </div>
 
-        <aside className="rounded-lg border border-slate-200 bg-white shadow-panel" aria-label="Recent system activity">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><h2 className="font-bold text-slate-900">Recent activity</h2><p className="text-xs text-slate-500">System log</p></div><button className="text-xs font-semibold text-primary-700 hover:text-primary-900">View all</button></div>
-          <ol className="divide-y divide-slate-100 px-5">
-            {activity.map(({ title, detail, icon: Icon, color }) => <li key={title} className="flex gap-3 py-4"><span className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full ${color}`}><Icon className="h-4 w-4" /></span><div className="min-w-0"><p className="text-sm font-semibold leading-5 text-slate-800">{title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p></div></li>)}
-          </ol>
+        <aside className="rounded-lg border border-slate-200 bg-white shadow-panel" aria-label="Configured grade sections">
+          <div className="border-b border-slate-200 px-5 py-4"><h2 className="font-bold text-slate-900">Configured grade sections</h2><p className="text-xs text-slate-500">Active class streams by grade</p></div>
+          <div className="divide-y divide-slate-100 px-5">
+            {(stats?.sectionsByGrade || []).map(({ gradeLevel, sections }) => <div key={gradeLevel} className="py-4"><p className="text-sm font-semibold text-slate-800">{gradeLevel}</p><p className="mt-1 text-sm text-slate-500">{sections.length ? sections.map((section) => section.sectionName).join(', ') : 'No active sections'}</p></div>)}
+            {!stats?.sectionsByGrade?.length && <p className="py-5 text-sm text-slate-500">{loading ? 'Loading sections…' : 'No configured grade sections.'}</p>}
+          </div>
         </aside>
       </section>
     </>

@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronRight, GraduationCap, HeartHandshake, Lightbulb, Scale, ShieldCheck, Target, UsersRound } from 'lucide-react'
+import { ChevronRight, Lightbulb, ShieldCheck, Target, UsersRound } from 'lucide-react'
 
 const principles = [
   { icon: Target, title: 'Our mission', text: 'To provide a secure, inclusive, and well-organized learning environment supported by systems that empower educators, students, and families to achieve their full potential.' },
@@ -13,12 +13,11 @@ const leaders = [
   { name: 'Nadia Okafor', title: 'IT Registrar', initials: 'NO', bio: 'Leads student records, admissions, academic reporting, and the responsible use of school systems.' },
 ]
 
-export default function AboutPage({ onHome, onPortal }) {
+export default function AboutPage({ onHome }) {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8"><button onClick={onHome} className="flex items-center gap-3 text-left"><span className="grid h-10 w-10 place-items-center rounded-md bg-primary-900 text-white"><GraduationCap className="h-6 w-6" /></span><span><span className="block text-sm font-bold">Northfield</span><span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Secondary School</span></span></button><button onClick={onPortal} className="rounded-md bg-primary-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-800">Login</button></div></header>
+    <div className="flex-1 bg-white text-slate-900">
       <main>
-        <section className="border-b border-primary-800 bg-primary-950"><div className="mx-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8"><div className="max-w-7xl"><nav className="flex items-center gap-2 text-xs font-semibold text-primary-300" aria-label="Breadcrumb"><button onClick={onHome} className="hover:text-white">Home</button><ChevronRight className="h-3.5 w-3.5" /><span className="text-white">About</span></nav><p className="mt-7 text-sm font-semibold text-primary-300">Northfield Secondary School</p><h1 className="mt-2 text-4xl font-bold text-white sm:text-5xl">About Our Institution</h1><p className="mt-4 max-w-2xl text-base leading-7 text-primary-100">A learning community grounded in strong values, excellent teaching, and a shared commitment to student success.</p></div></div></section>
+        <section className="border-b border-slate-200 bg-white"><div className="mx-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8"><div className="max-w-7xl"><nav className="flex items-center gap-2 text-xs font-semibold text-slate-500" aria-label="Breadcrumb"><button onClick={onHome} className="hover:text-slate-800">Home</button><ChevronRight className="h-3.5 w-3.5 text-slate-400" /><span className="text-slate-800">About</span></nav><p className="mt-7 text-sm font-semibold text-slate-600">Northfield Secondary School</p><h1 className="mt-2 text-4xl font-bold text-slate-900 sm:text-5xl">About Our Institution</h1><p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">A learning community grounded in strong values, excellent teaching, and a shared commitment to student success.</p></div></div></section>
 
         <section className="py-16 sm:py-20"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><div className="grid gap-5 md:grid-cols-3">{principles.map(({ icon: Icon, title, text }) => <article key={title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-panel"><span className="grid h-11 w-11 place-items-center rounded-md bg-primary-50 text-primary-800"><Icon className="h-5 w-5" /></span><h2 className="mt-5 text-xl font-bold text-slate-900">{title}</h2><p className="mt-3 text-sm leading-7 text-slate-600">{text}</p>{title === 'Our core values' && <div className="mt-4 flex flex-wrap gap-2"><span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700">Integrity</span><span className="rounded-full bg-success-50 px-2.5 py-1 text-xs font-semibold text-success-700">Excellence</span><span className="rounded-full bg-warning-50 px-2.5 py-1 text-xs font-semibold text-warning-700">Community</span></div>}</article>)}</div></div></section>
 
@@ -26,7 +25,6 @@ export default function AboutPage({ onHome, onPortal }) {
 
         <section className="py-16 sm:py-20"><div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><div className="max-w-2xl"><p className="text-sm font-bold uppercase tracking-wider text-primary-700">Leadership</p><h2 className="mt-3 text-3xl font-bold text-slate-950">Administration & leadership</h2><p className="mt-4 text-sm leading-7 text-slate-600">Our leadership team brings academic experience, operational rigor, and care to the everyday life of the institution.</p></div><div className="mt-10 grid gap-5 md:grid-cols-3">{leaders.map((leader, index) => <article key={leader.name} className="rounded-lg border border-slate-200 bg-white p-6 text-center shadow-panel"><div className={`mx-auto grid h-20 w-20 place-items-center rounded-full text-lg font-bold ${index === 0 ? 'bg-primary-100 text-primary-800' : index === 1 ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-700'}`}>{leader.initials}</div><h3 className="mt-4 text-lg font-bold text-slate-900">{leader.name}</h3><p className="mt-1 text-sm font-semibold text-primary-700">{leader.title}</p><p className="mt-3 text-sm leading-6 text-slate-600">{leader.bio}</p></article>)}</div></div></section>
       </main>
-      <footer className="border-t border-slate-200 bg-slate-50"><div className="mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8"><div className="flex flex-col gap-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between"><p>© 2026 Northfield Secondary School. All rights reserved.</p><button onClick={onHome} className="font-semibold text-primary-700">Return to home</button></div></div></footer>
     </div>
   )
 }
