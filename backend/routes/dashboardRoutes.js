@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { bulkImportStudents, deleteStudent, downloadStudentImportTemplate, getAcademicOptions, getHomeImages, getPublicSchoolProfile, getStudent, getStudentProfile, listStudents, registerStudent, updateStudent, uploadHomeImage } from '../controllers/dashboardController.js'
+import { bulkImportStudents, deleteStudent, downloadStudentImportTemplate, getAcademicOptions, getHomeImages, getPublicSchoolProfile, getStudent, getStudentProfile, getWorkspaceAcademicPeriod, listStudents, registerStudent, updateStudent, uploadHomeImage } from '../controllers/dashboardController.js'
 import { getTeacherClassGrades, listTeacherClasses, saveTeacherClassGrades } from '../controllers/teacherController.js'
 import { authenticateUser, authorizeRoles, requireSchoolAdmin } from '../middleware/authMiddleware.js'
 
@@ -31,6 +31,7 @@ const upload = multer({
 
 router.get('/home-images', getHomeImages)
 router.get('/school-profile', getPublicSchoolProfile)
+router.get('/workspace-academic-period', authenticateUser, getWorkspaceAcademicPeriod)
 router.get('/academic-options', authenticateUser, authorizeRoles('School Admin', 'Registrar'), getAcademicOptions)
 router.get('/students/me', authenticateUser, getStudentProfile)
 router.get('/teacher/classes', authenticateUser, authorizeRoles('Teacher'), listTeacherClasses)

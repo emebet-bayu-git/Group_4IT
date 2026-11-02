@@ -34,7 +34,7 @@ export default function TeacherDashboard({ teacherName = 'Teacher', onEnterGrade
 
   return (
     <>
-      <section className="relative overflow-hidden rounded-lg bg-primary-900 px-5 py-6 text-white shadow-panel sm:px-7 sm:py-8">
+      <section className="workspace-hover-card relative overflow-hidden rounded-lg border border-transparent bg-primary-900 px-5 py-6 text-white shadow-panel sm:px-7 sm:py-8">
         <div className="absolute right-0 top-0 h-full w-2/5 bg-primary-800/40" aria-hidden="true" />
         <div className="relative max-w-2xl">
           <p className="text-sm font-semibold text-primary-200">Teacher dashboard</p>
@@ -52,7 +52,7 @@ export default function TeacherDashboard({ teacherName = 'Teacher', onEnterGrade
         {loading ? <p role="status" className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading assigned classes…</p>
           : classes.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {classes.map((classItem) => (
-              <article key={classItem.id} className="flex min-h-56 flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+              <article key={classItem.id} className="workspace-hover-card flex min-h-56 flex-col rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-wide text-primary-700">{classItem.subject}</p><h3 className="mt-2 text-lg font-bold leading-6 text-slate-900">{classItem.gradeLevel} · {classItem.sectionName}</h3></div><div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-primary-50 text-primary-700"><ClipboardList className="h-5 w-5" /></div></div>
                 <div className="mt-5 flex items-center gap-2 text-sm font-semibold text-slate-700"><Users className="h-4 w-4 text-slate-400" />{classItem.studentCount} students</div>
                 <p className="mt-2 text-xs text-slate-500">{period ? `${period.semester} · ${period.academicYear}` : 'Academic period not set'}</p>
@@ -62,7 +62,7 @@ export default function TeacherDashboard({ teacherName = 'Teacher', onEnterGrade
           </div> : <p className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-600">No classes have been assigned to your account.</p>}
       </section>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white shadow-panel" aria-labelledby="notice-board-heading">
+      <section className="workspace-hover-card mt-6 rounded-lg border border-slate-200 bg-white shadow-panel" aria-labelledby="notice-board-heading">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4"><div><h2 id="notice-board-heading" className="font-bold text-slate-900">Notice board</h2><p className="mt-0.5 text-xs text-slate-500">Administration alerts and deadlines</p></div><button className="hidden items-center gap-1 text-sm font-semibold text-primary-700 hover:text-primary-900 sm:flex">View all notices<ArrowRight className="h-4 w-4" /></button></div>
         <div className="divide-y divide-slate-100">
           {notices.map((notice) => (

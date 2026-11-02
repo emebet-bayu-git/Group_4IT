@@ -812,6 +812,23 @@ export async function getPublicSchoolProfile(_req, res, next) {
   } catch (error) { next(error) }
 }
 
+export async function getWorkspaceAcademicPeriod(req, res, next) {
+  try {
+    const schoolId = await getAccountSchoolId(req.user.id)
+    if (!schoolId) return res.status(403).json({ message: 'Your account is not assigned to a school.' })
+    const [rows] = await pool.execute(
+      `SELECT year.name AS academicYear, term.name AS semester
+       FROM academic_years year
+       LEFT JOIN academic_terms term ON term.academic_year_id = year.id
+         AND term.school_id = year.school_id AND term.is_active = TRUE
+       WHERE year.school_id = ? AND year.is_active = TRUE
+       ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
+      [schoolId]
+    )
+    res.json(rows[0] ?? null)
+  } catch (error) { next(error) }
+}
+
 export async function uploadHomeImage(req, res, next) {
   try {
     const { title, description = '', category = 'Events', is_featured_home = false } = req.body

@@ -74,6 +74,7 @@ export default function DashboardPage({ user, onLogout }) {
   const [dashboardStats, setDashboardStats] = useState(null)
   const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
   const [dashboardStatsError, setDashboardStatsError] = useState('')
+  const [academicPeriod, setAcademicPeriod] = useState(null)
   const role = user.systemRole || user.role
   const refreshDashboardStats = async () => {
     setDashboardStatsLoading(true)
@@ -104,6 +105,17 @@ export default function DashboardPage({ user, onLogout }) {
     }
     refreshDashboardStats()
     return undefined
+  }, [role])
+  useEffect(() => {
+    let active = true
+    axios.get('/api/workspace-academic-period', {
+      headers: { Authorization: `Bearer ${readSessionToken()}` },
+    }).then(({ data }) => {
+      if (active) setAcademicPeriod(data)
+    }).catch(() => {
+      if (active) setAcademicPeriod(null)
+    })
+    return () => { active = false }
   }, [role])
   useEffect(() => {
     if (role !== 'Student') return undefined
@@ -206,8 +218,8 @@ export default function DashboardPage({ user, onLogout }) {
   return (
     <DashboardLayout
       user={user}
-      academicYear={role === 'School Admin' ? dashboardStats?.academicPeriod?.academicYear || 'Not configured' : undefined}
-      semester={role === 'School Admin' ? dashboardStats?.academicPeriod?.semester || 'No current semester' : undefined}
+      academicYear={academicPeriod?.academicYear || dashboardStats?.academicPeriod?.academicYear || 'Not configured'}
+      semester={academicPeriod?.semester || dashboardStats?.academicPeriod?.semester || 'No current semester'}
       activeTask={currentTask}
       onNavigate={navigateTask}
       onLogout={onLogout}

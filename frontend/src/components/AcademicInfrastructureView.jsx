@@ -160,7 +160,7 @@ export default function AcademicInfrastructureView({ onConfigurationChange }) {
       {toast && <div role={toast.type === 'error' ? 'alert' : 'status'} className={`fixed right-4 top-20 z-[60] max-w-sm rounded-md border p-4 text-sm shadow-lg ${toast.type === 'error' ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-800'}`}>{toast.message}</div>}
       {loading && <p role="status" className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading academic configuration…</p>}
 
-      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="academic-years-heading">
+      <section className="workspace-hover-card space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="academic-years-heading">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="academic-years-heading" className="text-lg font-bold text-slate-900">Academic Years</h2><p className="mt-1 text-sm text-slate-600">Define school academic years and date ranges. Check 'Active' for the current operating year.</p></div><button type="button" disabled={Boolean(busy)} onClick={() => setYears((current) => [...current, { ...blankYear }])} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Plus className="h-4 w-4" />Add year</button></div>
         {years.map((year, index) => {
           const locked = isCalendarRowLocked(year, editingYears)
@@ -175,7 +175,7 @@ export default function AcademicInfrastructureView({ onConfigurationChange }) {
         {!years.length && !loading && <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">No academic years yet. Add a year to begin setting up the school calendar.</p>}
       </section>
 
-      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="semesters-heading">
+      <section className="workspace-hover-card space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="semesters-heading">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="semesters-heading" className="text-lg font-bold text-slate-900">Semesters</h2><p className="mt-1 text-sm text-slate-600">Divide the academic year into semesters (e.g., Semester 1, Semester 2) and specify their schedules.</p></div><button type="button" disabled={Boolean(busy) || !years.length} onClick={() => setTerms((current) => [...current, { ...blankTerm, academicYearId: String(years[0]?.id || '') }])} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Plus className="h-4 w-4" />Add semester</button></div>
         {terms.map((term, index) => {
           const locked = isCalendarRowLocked(term, editingTerms)
@@ -191,7 +191,7 @@ export default function AcademicInfrastructureView({ onConfigurationChange }) {
         {!terms.length && !loading && <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">No semesters yet. Add an academic year before creating its semesters.</p>}
       </section>
 
-      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="grade-sections-heading">
+      <section className="workspace-hover-card space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-panel" aria-labelledby="grade-sections-heading">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="grade-sections-heading" className="text-lg font-bold text-slate-900">Grade Levels &amp; Sections (Grades 9–12)</h2><p className="mt-1 text-sm text-slate-600">Manage grade levels (9, 10, 11, 12) and their corresponding section streams (e.g., Section A, B, C).</p><p className="mt-2 text-sm font-semibold text-primary-800">{canAssignSection ? `New sections will be linked to ${activeYear.name} · ${activeSemester.name}.` : 'New sections are automatically linked to the active academic year and semester.'}</p></div><button type="button" disabled={Boolean(busy)} onClick={addSection} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Plus className="h-4 w-4" />Add grade section</button></div>
         {!canAssignSection && !loading && <p id="active-period-warning" role="alert" className="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">To enable Save, go to Academic Years above and check “Active” for the current year, then go to Semesters and check “Current semester.” New sections will be linked to those selections automatically.</p>}
         {sections.filter((section) => section.id).length > 0 && <div className="overflow-x-auto rounded-md border border-slate-200">
