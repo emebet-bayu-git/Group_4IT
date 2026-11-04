@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # School Information Management System
 
 ## Project structure
@@ -26,3 +27,6 @@ The System Administration dashboard is available to Super Admins and to users wi
 Backups are intentionally not implemented. Purging a graduate deletes the detailed user and student profile after archival; the random-code transcript verification endpoint retains only student ID/name, grade, section, year, and archive/purge timestamps. Treat the verification code as a bearer token. Existing role permissions remain subject to the backend JWT and database checks; disabling an account or changing its role takes effect on the next authenticated request.
 
 The existing grade-entry and transcript screens still use demo UI data and do not yet have backend write/generation endpoints.
+=======
+﻿# tade
+>>>>>>> eca7780e330d8dcb79da01cc3e3652dddb275f35
