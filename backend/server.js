@@ -10,6 +10,7 @@ import authRoutes from './routes/authRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import academicRoutes from './routes/academicRoutes.js'
+import schoolRoutes from './routes/schoolRoutes.js'
 
 const app = express()
 const port = Number(process.env.API_PORT || 4000)
@@ -39,12 +40,15 @@ app.use('/api', (_req, res, next) => {
   })
 })
 app.use('/api/auth', authRoutes)
+app.use('/api/schools', schoolRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/system-admin', adminRoutes)
 app.use('/api/academic', academicRoutes)
 app.use('/api', dashboardRoutes)
 
 app.use((error, _req, res, _next) => {
   if (error instanceof multer.MulterError) return res.status(400).json({ message: error.message })
+  if (error.status === 400) return res.status(400).json({ message: error.message })
   if (error.code === 'ER_BAD_FIELD_ERROR' || error.code === 'ER_NO_SUCH_TABLE') {
     console.error('A database query failed because a required SIMS table or field is unavailable:', error.message)
     return res.status(503).json({

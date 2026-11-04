@@ -2,8 +2,8 @@ import { Router } from 'express'
 import {
   createAcademicSection, createAcademicTerm, createAcademicYear,
   deleteAcademicSection, deleteAcademicTerm, deleteAcademicYear,
-  getActiveAcademicPeriod, listAcademicSections, listAcademicTerms, listAcademicYears,
-  updateAcademicSection, updateAcademicTerm, updateAcademicYear,
+  getActiveAcademicPeriod, listAcademicSections, listAcademicTeachers, listAcademicTerms, listAcademicYears,
+  updateAcademicSection, updateAcademicSectionAdvisor, updateAcademicTerm, updateAcademicYear,
 } from '../controllers/academicController.js'
 import { authenticateUser, authorizeRoles } from '../middleware/authMiddleware.js'
 
@@ -22,8 +22,10 @@ router.put('/terms/:id', updateAcademicTerm)
 router.delete('/terms/:id', deleteAcademicTerm)
 
 router.get('/sections', listAcademicSections)
+router.get('/teachers', listAcademicTeachers)
 router.post('/sections', createAcademicSection)
 router.put('/sections/:id', updateAcademicSection)
+router.put('/sections/:id/advisor', updateAcademicSectionAdvisor)
 router.delete('/sections/:id', deleteAcademicSection)
 
 export default router

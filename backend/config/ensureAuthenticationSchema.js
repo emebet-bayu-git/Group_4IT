@@ -30,6 +30,18 @@ export async function ensureAuthenticationSchema() {
   await ensureColumn('token_version', 'INT UNSIGNED NOT NULL DEFAULT 0')
   await ensureColumn('registration_source', "ENUM('admin', 'registrar', 'pending') NOT NULL DEFAULT 'pending'")
   await ensureColumn('registered_by', 'INT NULL')
+  await ensureColumn('username', 'VARCHAR(60) NULL')
+  await ensureColumn('phone', 'VARCHAR(40) NULL')
+  await ensureColumn('department', 'VARCHAR(100) NULL')
+  await ensureColumn('avatar_path', 'VARCHAR(500) NULL')
+  const [usernameIndex] = await pool.execute(
+    `SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'users'
+       AND index_name = 'uq_users_username' LIMIT 1`
+  )
+  if (!usernameIndex.length) {
+    await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_users_username (username)')
+  }
 
   await pool.query(`CREATE TABLE IF NOT EXISTS system_security_policy (
     id TINYINT PRIMARY KEY,

@@ -11,6 +11,58 @@ const studentPhotoDirectory = path.resolve(directory, '../../uploads/students')
 const roles = ['Super Admin', 'School Admin', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor', 'Teacher', 'Student']
 const permissions = ['users', 'setup', 'security', 'health', 'delegations', 'archive']
 
+export async function getSystemStatus(_req, res, next) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT setting_key AS settingKey, setting_value AS settingValue
+       FROM school_settings
+       WHERE setting_key IN ('is_system_active', 'closure_message')`
+    )
+    const settings = Object.fromEntries(rows.map((row) => [row.settingKey, row.settingValue]))
+    res.json({
+      isSystemActive: settings.is_system_active !== 'false',
+      closureMessage: settings.closure_message || '',
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function toggleSystemStatus(req, res, next) {
+  const isSystemActive = req.body?.isSystemActive
+  const closureMessage = typeof req.body?.closureMessage === 'string'
+    ? req.body.closureMessage.trim().slice(0, 500)
+    : ''
+
+  if (typeof isSystemActive !== 'boolean') {
+    return res.status(400).json({ message: 'Provide a valid system status.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    await connection.execute(
+      `INSERT INTO school_settings (setting_key, setting_value, school_id)
+       VALUES ('is_system_active', ?, 1)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+      [isSystemActive ? 'true' : 'false']
+    )
+    await connection.execute(
+      `INSERT INTO school_settings (setting_key, setting_value, school_id)
+       VALUES ('closure_message', ?, 1)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+      [closureMessage]
+    )
+    await connection.commit()
+    res.json({ isSystemActive, closureMessage })
+  } catch (error) {
+    await connection.rollback()
+    next(error)
+  } finally {
+    connection.release()
+  }
+}
+
 export async function getSystemAccess(req, res, next) {
   if (req.user.role === 'Super Admin') return res.json({ isSuperAdmin: true, role: req.user.role, permissions })
   try {
@@ -69,13 +121,57 @@ async function validateTeacherClassAssignments(executor, schoolId, assignments) 
 }
 
 async function replaceTeacherClassAssignments(executor, teacherId, schoolId, assignments) {
-  await executor.execute('DELETE FROM teacher_class_assignments WHERE teacher_id = ? AND school_id = ?', [teacherId, schoolId])
+  const [existingAssignments] = await executor.execute(
+    `SELECT assignment.id, assignment.section_id AS sectionId, assignment.subject
+     FROM teacher_class_assignments assignment
+     WHERE assignment.teacher_id = ? AND assignment.school_id = ?`,
+    [teacherId, schoolId]
+  )
+  const existingByKey = new Map(existingAssignments.map((assignment) => [
+    `${assignment.sectionId}:${assignment.subject.toLowerCase()}`,
+    assignment,
+  ]))
+  const desiredKeys = new Set(assignments.map((assignment) => (
+    `${assignment.sectionId}:${assignment.subject.toLowerCase()}`
+  )))
+  for (const assignment of existingAssignments) {
+    const key = `${assignment.sectionId}:${assignment.subject.toLowerCase()}`
+    if (!desiredKeys.has(key)) {
+      await executor.execute('DELETE FROM teacher_class_assignments WHERE id = ?', [assignment.id])
+    } else {
+      const desired = assignments.find((item) => `${item.sectionId}:${item.subject.toLowerCase()}` === key)
+      if (desired.subject !== assignment.subject) {
+        await executor.execute(
+          'UPDATE teacher_class_assignments SET subject = ? WHERE id = ?',
+          [desired.subject, assignment.id]
+        )
+      }
+    }
+  }
+  await executor.execute('DELETE FROM teacher_subject_assignments WHERE teacher_id = ? AND school_id = ?', [teacherId, schoolId])
   for (const assignment of assignments) {
-    await executor.execute(
-      `INSERT INTO teacher_class_assignments (teacher_id, school_id, section_id, subject)
-       VALUES (?, ?, ?, ?)`,
-      [teacherId, schoolId, assignment.sectionId, assignment.subject]
+    const [[section]] = await executor.execute(
+      'SELECT grade_level AS gradeLevel FROM school_sections WHERE id = ? AND school_id = ? LIMIT 1',
+      [assignment.sectionId, schoolId]
     )
+    const [subjectResult] = await executor.execute(
+      `INSERT INTO school_subjects (school_id, name) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+      [schoolId, assignment.subject]
+    )
+    await executor.execute(
+      `INSERT INTO teacher_subject_assignments
+         (teacher_id, school_id, subject_id, grade_level, section_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [teacherId, schoolId, subjectResult.insertId, section.gradeLevel, assignment.sectionId]
+    )
+    if (!existingByKey.has(`${assignment.sectionId}:${assignment.subject.toLowerCase()}`)) {
+      await executor.execute(
+        `INSERT INTO teacher_class_assignments (teacher_id, school_id, section_id, subject)
+         VALUES (?, ?, ?, ?)`,
+        [teacherId, schoolId, assignment.sectionId, assignment.subject]
+      )
+    }
   }
 }
 
@@ -90,6 +186,24 @@ async function getTeacherClassAssignments(executor, teacherId, schoolId) {
     [teacherId, schoolId]
   )
   return rows
+}
+
+async function hasUnarchivedGrades(executor, assignmentIds) {
+  if (!assignmentIds.length) return false
+  const [rows] = await executor.execute(
+    `SELECT grade.assignment_id
+     FROM student_grades grade
+     LEFT JOIN permanent_academic_records archived
+       ON archived.assignment_id = grade.assignment_id
+       AND archived.student_id = grade.student_id
+       AND archived.academic_year_id = grade.academic_year_id
+       AND archived.term_id = grade.term_id
+     WHERE grade.assignment_id IN (${assignmentIds.map(() => '?').join(', ')})
+       AND archived.id IS NULL
+     LIMIT 1`,
+    assignmentIds
+  )
+  return rows.length > 0
 }
 
 function validId(value) {
@@ -123,6 +237,17 @@ function passwordMeetsPolicy(password, policy) {
     && (!policy.require_password_number || /\d/.test(password))
 }
 
+function generateInitialPassword(policy) {
+  if (Number(policy.min_password_length) > 68) {
+    throw new Error('Configured password policy exceeds the supported initial credential length.')
+  }
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const password = `Aa2-${crypto.randomBytes(48).toString('base64url')}`
+    if (passwordMeetsPolicy(password, policy)) return password
+  }
+  throw new Error('Unable to generate an initial credential that meets the configured password policy.')
+}
+
 function isProtectedDefaultAdminUser(user) {
   const protectedEmail = String(process.env.DEFAULT_ADMIN_EMAIL || 'admin@gmail.com').trim().toLowerCase()
   return Boolean(user?.email) && user.email.toLowerCase() === protectedEmail
@@ -148,11 +273,67 @@ export async function listUsers(req, res, next) {
         `SELECT id, full_name AS name, email, role, grade_level AS gradeLevel,
                 is_active AS isActive, failed_login_attempts AS failedLoginAttempts,
                 locked_until AS lockedUntil, created_at AS createdAt
-         FROM users ORDER BY id DESC LIMIT 500`
+         FROM users
+         WHERE role = 'School Admin'
+         ORDER BY id DESC
+         LIMIT 500`
       )
     }
     res.json(rows)
   } catch (error) { next(error) }
+}
+
+export async function listSchoolAdmins(_req, res, next) {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT id, full_name AS name, email, role, grade_level AS gradeLevel,
+              is_active AS isActive, failed_login_attempts AS failedLoginAttempts,
+              locked_until AS lockedUntil, created_at AS createdAt
+       FROM users
+       WHERE role = 'School Admin'
+       ORDER BY id DESC
+       LIMIT 500`
+    )
+
+    if (!rows.length) return res.json([])
+
+    const ids = rows.map((row) => row.id)
+    const placeholders = ids.map(() => '?').join(', ')
+    const [assignments] = await pool.execute(
+      `SELECT u.id AS userId, s.id, s.name, s.code, s.status,
+              s.region, s.zone, s.wereda
+       FROM users u
+       LEFT JOIN school_admin_assignments saa ON saa.user_id = u.id
+       LEFT JOIN schools s ON s.id = COALESCE(saa.school_id, u.school_id)
+       WHERE u.role = 'School Admin' AND u.id IN (${placeholders})
+       ORDER BY s.name, s.id`,
+      ids
+    )
+
+    const schoolsByUser = new Map()
+    assignments.forEach((school) => {
+      const current = schoolsByUser.get(school.userId) || []
+      if (school.id) {
+        current.push({
+          id: school.id,
+          name: school.name,
+          code: school.code,
+          status: school.status,
+          region: school.region || '',
+          zone: school.zone || '',
+          woreda: school.wereda || '',
+        })
+      }
+      schoolsByUser.set(school.userId, current)
+    })
+
+    res.json(rows.map((row) => ({
+      ...row,
+      assignedSchools: schoolsByUser.get(row.id) || [],
+    })))
+  } catch (error) {
+    next(error)
+  }
 }
 
 export async function listSchoolStaff(req, res, next) {
@@ -160,11 +341,16 @@ export async function listSchoolStaff(req, res, next) {
     const schoolId = await getAssignedSchoolId(req.user.id)
     if (!validId(schoolId)) return res.status(403).json({ message: 'Your account is not assigned to a school.' })
     const [rows] = await pool.execute(
-      `SELECT id, full_name AS name, email, role, department, subjects,
-              is_active AS isActive, created_at AS createdAt
+      `SELECT users.id, users.full_name AS name, users.email, users.username, users.role,
+              users.department, users.subjects,
+              teachers.woreda_employee_id AS woredaEmployeeId,
+              teachers.phone_number AS phoneNumber,
+              teachers.specialization, teachers.qualification_degree AS qualificationDegree,
+              users.is_active AS isActive, users.created_at AS createdAt
        FROM users
-      WHERE school_id = ? AND role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
-       ORDER BY role, full_name, id DESC`,
+       LEFT JOIN teachers ON teachers.id = users.id AND teachers.school_id = users.school_id
+      WHERE users.school_id = ? AND users.role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
+       ORDER BY users.role, users.full_name, users.id DESC`,
       [schoolId]
     )
     return res.json(rows)
@@ -177,10 +363,16 @@ export async function getSchoolStaffMember(req, res, next) {
     const schoolId = await getAssignedSchoolId(req.user.id)
     if (!validId(schoolId)) return res.status(403).json({ message: 'Your account is not assigned to a school.' })
     const [rows] = await pool.execute(
-      `SELECT id, full_name AS name, email, role, department, subjects,
-              is_active AS isActive, created_at AS createdAt
+      `SELECT users.id, users.full_name AS name, users.email, users.username, users.role,
+              users.department, users.subjects,
+              teachers.woreda_employee_id AS woredaEmployeeId,
+              teachers.phone_number AS phoneNumber,
+              teachers.specialization, teachers.qualification_degree AS qualificationDegree,
+              users.is_active AS isActive, users.created_at AS createdAt
        FROM users
-      WHERE id = ? AND school_id = ? AND role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
+       LEFT JOIN teachers ON teachers.id = users.id AND teachers.school_id = users.school_id
+      WHERE users.id = ? AND users.school_id = ?
+        AND users.role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
        LIMIT 1`,
       [req.params.id, schoolId]
     )
@@ -198,7 +390,10 @@ export async function updateSchoolStaffMember(req, res, next) {
   const { id } = req.params
   const body = req.body ?? {}
   if (!validId(id)) return res.status(400).json({ message: 'Provide a valid staff ID.' })
-  const fields = ['name', 'email', 'role', 'department', 'subjects', 'classAssignments', 'isActive']
+  if (Object.hasOwn(body, 'role') || Object.hasOwn(body, 'classAssignments') || Object.hasOwn(body, 'subjects')) {
+    return res.status(403).json({ message: 'Manage staff roles through Role Assign and teacher workloads through the Vice Principal workload module.' })
+  }
+  const fields = ['name', 'email', 'department', 'isActive']
   if (!fields.some((field) => Object.hasOwn(body, field))) {
     return res.status(400).json({ message: 'Provide at least one staff field to update.' })
   }
@@ -209,20 +404,11 @@ export async function updateSchoolStaffMember(req, res, next) {
     || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) || body.email.trim().length > 100)) {
     return res.status(400).json({ message: 'Provide a valid email address of at most 100 characters.' })
   }
-  if (Object.hasOwn(body, 'role') && !['Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor'].includes(body.role)) {
-    return res.status(400).json({ message: 'Choose a role assigned to school staff.' })
-  }
   if (Object.hasOwn(body, 'department') && (typeof body.department !== 'string' || body.department.trim().length > 100)) {
     return res.status(400).json({ message: 'Department must be at most 100 characters.' })
   }
-  if (Object.hasOwn(body, 'subjects') && (typeof body.subjects !== 'string' || body.subjects.length > 2000)) {
-    return res.status(400).json({ message: 'Subjects must be at most 2000 characters.' })
-  }
   if (Object.hasOwn(body, 'isActive') && typeof body.isActive !== 'boolean') {
     return res.status(400).json({ message: 'Account status must be active or inactive.' })
-  }
-  if (Object.hasOwn(body, 'classAssignments') && !Array.isArray(body.classAssignments)) {
-    return res.status(400).json({ message: 'Class assignments must be a list.' })
   }
 
   let connection
@@ -235,42 +421,26 @@ export async function updateSchoolStaffMember(req, res, next) {
       [id, schoolId]
     )
     if (!targets.length) return res.status(404).json({ message: 'Staff member not found in your school.' })
-    const updatedRole = body.role ?? targets[0].role
+    const updatedRole = targets[0].role
     const updatedDepartment = body.department ?? targets[0].department
-    const updatedSubjects = body.subjects ?? targets[0].subjects
-    let teacherAssignments
-    if (updatedRole === 'Teacher' && Object.hasOwn(body, 'classAssignments')) {
-      const validated = await validateTeacherClassAssignments(pool, schoolId, body.classAssignments)
-      if (validated.error) return res.status(400).json({ message: validated.error })
-      teacherAssignments = validated.assignments
-    }
-    const changingTeachingAssignment = ['role', 'department', 'subjects'].some((field) => Object.hasOwn(body, field))
-    if (updatedRole === 'Teacher' && changingTeachingAssignment && (!String(updatedDepartment || '').trim() || !String(updatedSubjects || '').trim())) {
-      return res.status(400).json({ message: 'Teachers require a department and assigned subjects.' })
+    const changingTeacherProfile = Object.hasOwn(body, 'department')
+    if (updatedRole === 'Teacher' && changingTeacherProfile && !String(updatedDepartment || '').trim()) {
+      return res.status(400).json({ message: 'Teacher specialization is required.' })
     }
     const assignments = []
     const values = []
     if (Object.hasOwn(body, 'name')) { assignments.push('full_name = ?'); values.push(body.name.trim()) }
     if (Object.hasOwn(body, 'email')) { assignments.push('email = ?'); values.push(body.email.trim().toLowerCase()) }
-    if (Object.hasOwn(body, 'role')) { assignments.push('role = ?'); values.push(body.role) }
     if (Object.hasOwn(body, 'department')) { assignments.push('department = ?'); values.push(body.department.trim() || null) }
-    if (Object.hasOwn(body, 'subjects')) { assignments.push('subjects = ?'); values.push(body.subjects.trim() || null) }
     if (Object.hasOwn(body, 'isActive')) {
       assignments.push('is_active = ?', 'token_version = token_version + 1')
       values.push(body.isActive)
       if (body.isActive) assignments.push('failed_login_attempts = 0, locked_until = NULL')
-    } else if (Object.hasOwn(body, 'role')) {
-      assignments.push('token_version = token_version + 1')
     }
     values.push(id, schoolId)
     connection = await pool.getConnection()
     await connection.beginTransaction()
     await connection.execute(`UPDATE users SET ${assignments.join(', ')} WHERE id = ? AND school_id = ?`, values)
-    if (updatedRole === 'Teacher' && teacherAssignments) {
-      await replaceTeacherClassAssignments(connection, id, schoolId, teacherAssignments)
-    } else if (updatedRole !== 'Teacher') {
-      await connection.execute('DELETE FROM teacher_class_assignments WHERE teacher_id = ? AND school_id = ?', [id, schoolId])
-    }
     await connection.execute(
       `INSERT INTO activity_logs (actor_id, actor_role, action, module, details)
        VALUES (?, ?, 'staff.updated', 'users', ?)`,
@@ -322,22 +492,105 @@ export async function deactivateSchoolStaffMember(req, res, next) {
   } catch (error) { return next(error) }
 }
 
+export async function createWoredaTeacher(req, res, next) {
+  const body = req.body ?? {}
+  const employeeId = typeof body.woredaEmployeeId === 'string' ? body.woredaEmployeeId.trim() : ''
+  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  const phone = typeof body.phoneNumber === 'string' ? body.phoneNumber.trim() : ''
+  const specialization = typeof body.specialization === 'string' ? body.specialization.trim() : ''
+  const qualification = typeof body.qualificationDegree === 'string' ? body.qualificationDegree.trim() : ''
+  const credential = typeof body.usernameOrEmail === 'string' ? body.usernameOrEmail.trim() : ''
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(credential)
+  const isUsername = /^[a-zA-Z0-9._-]{3,60}$/.test(credential)
+  if (!employeeId || employeeId.length > 50 || !name || name.length > 100
+    || phone.length < 5 || phone.length > 40 || !specialization || specialization.length > 100
+    || !qualification || qualification.length > 100 || (!isEmail && !isUsername)) {
+    return res.status(400).json({
+      message: 'Enter the Woreda employee ID, full name, valid phone number, specialization, qualification, and a valid email address or username.',
+    })
+  }
+  try {
+    const schoolId = await getAssignedSchoolId(req.user.id)
+    if (!validId(schoolId)) {
+      return res.status(403).json({ message: 'Your School Admin account is not assigned to a school.' })
+    }
+    const [[school]] = await pool.execute(
+      "SELECT id FROM schools WHERE id = ? AND status = 'active' LIMIT 1",
+      [schoolId]
+    )
+    if (!school) return res.status(403).json({ message: 'Your assigned school is not active.' })
+    const policy = await getPolicy()
+    const initialPassword = generateInitialPassword(policy)
+    const passwordHash = await bcrypt.hash(initialPassword, 10)
+    const email = isEmail ? credential.toLowerCase() : `teacher-${crypto.randomUUID()}@accounts.school.local`
+    const username = isEmail ? null : credential.toLowerCase()
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      const [userResult] = await connection.execute(
+        `INSERT INTO users
+           (full_name, email, username, phone, password, role, grade_level, is_active,
+            registration_source, registered_by, school_id, department, subjects)
+         VALUES (?, ?, ?, ?, ?, 'Teacher', 'N/A', TRUE, 'admin', ?, ?, ?, ?)`,
+        [name, email, username, phone, passwordHash, req.user.id, schoolId, specialization, specialization]
+      )
+      await connection.execute(
+        `INSERT INTO teachers
+           (id, school_id, woreda_employee_id, phone_number, specialization, qualification_degree)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [userResult.insertId, schoolId, employeeId, phone, specialization, qualification]
+      )
+      await connection.execute(
+        `INSERT INTO activity_logs (actor_id, actor_role, action, module, details)
+         VALUES (?, ?, 'teacher.woreda_onboarded', 'teachers', ?)`,
+        [req.user.id, req.user.role, JSON.stringify({
+          teacherId: userResult.insertId, schoolId, woredaEmployeeId: employeeId,
+        })]
+      )
+      await connection.commit()
+      return res.status(201).json({
+        id: Number(userResult.insertId),
+        name,
+        woredaEmployeeId: employeeId,
+        usernameOrEmail: isEmail ? email : username,
+        initialPassword,
+        message: 'Teacher onboarded. Save the initial password now; it will not be shown again.',
+      })
+    } catch (error) {
+      await connection.rollback()
+      if (error.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ message: 'The Woreda employee ID or system credential is already in use.' })
+      }
+      throw error
+    } finally {
+      connection.release()
+    }
+  } catch (error) {
+    return next(error)
+  }
+}
+
 export async function createUser(req, res, next) {
-  const {
-    name, email, password, role, gradeLevel, section,
-    studentNumber, department, subjects, classAssignments,
-  } = req.body ?? {}
+  const { name, email, password, role } = req.body ?? {}
   let schoolId = req.body?.schoolId ?? req.body?.school_id
   if (schoolId === '') schoolId = undefined
   const cleanName = typeof name === 'string' ? name.trim() : ''
   const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
-  const cleanSection = typeof section === 'string' ? section.trim() : ''
-  const cleanStudentNumber = typeof studentNumber === 'string' ? studentNumber.trim() : ''
-  const cleanDepartment = typeof department === 'string' ? department.trim() : ''
-  const cleanSubjects = typeof subjects === 'string' ? subjects.trim() : ''
+  if (role === 'Student') {
+    return res.status(403).json({ message: 'Student accounts must be created through the Registrar student registration workflow.' })
+  }
+  if (['Teacher', 'Registrar', 'Vice Principal'].includes(role) && req.user.role !== 'School Admin') {
+    return res.status(403).json({ message: 'Only a School Admin can create staff accounts for an assigned school.' })
+  }
+  if (role === 'Teacher') {
+    return res.status(400).json({ message: 'Use Woreda-Deployed Teacher Registration to create teacher accounts.' })
+  }
+  if (role === 'Vice Principal') {
+    return res.status(400).json({ message: 'Assign the Vice Principal role to an existing staff account through Role Assign.' })
+  }
   const allowedRoles = req.user.role === 'Super Admin'
-    ? ['School Admin', 'Teacher', 'Registrar', 'Student']
-    : ['Teacher', 'Registrar', 'Student']
+    ? ['School Admin']
+    : ['Registrar']
   if (!cleanName || cleanName.length > 100) {
     return res.status(400).json({ message: 'A name is required and must be at most 100 characters.' })
   }
@@ -347,15 +600,8 @@ export async function createUser(req, res, next) {
   if (!allowedRoles.includes(role)) {
     return res.status(400).json({ message: 'Select a role you are permitted to register.' })
   }
-  if (role === 'Student' && (!['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].includes(gradeLevel)
-    || !cleanSection || cleanSection.length > 30 || cleanStudentNumber.length > 50)) {
-    return res.status(400).json({ message: 'Students require a valid Grade 9–12 grade level and section; student ID must be at most 50 characters.' })
-  }
-  if (role === 'Teacher' && (!cleanDepartment || !cleanSubjects || cleanDepartment.length > 100 || cleanSubjects.length > 2000)) {
-    return res.status(400).json({ message: 'Teachers require a department and subjects; each must fit the allowed length.' })
-  }
-  if (role === 'Teacher' && !Array.isArray(classAssignments)) {
-    return res.status(400).json({ message: 'Assign at least one class section to the teacher.' })
+  if (Array.isArray(req.body?.classAssignments) && req.body.classAssignments.length > 0) {
+    return res.status(403).json({ message: 'Teacher workloads can only be managed through the Vice Principal workload module.' })
   }
   try {
     if (req.user.role === 'School Admin') {
@@ -383,13 +629,6 @@ export async function createUser(req, res, next) {
       [schoolId]
     )
     if (!schools.length) return res.status(400).json({ message: 'Select an active school.' })
-    let teacherAssignments = []
-    if (role === 'Teacher') {
-      const validated = await validateTeacherClassAssignments(pool, schoolId, classAssignments)
-      if (validated.error) return res.status(400).json({ message: validated.error })
-      teacherAssignments = validated.assignments
-    }
-
     const connection = await pool.getConnection()
     try {
       await connection.beginTransaction()
@@ -404,13 +643,13 @@ export async function createUser(req, res, next) {
           cleanEmail,
           passwordHash,
           role,
-          role === 'Student' ? gradeLevel : 'N/A',
+          'N/A',
           req.user.id,
           schoolId,
-          role === 'Student' ? cleanSection : null,
-          role === 'Teacher' ? cleanDepartment || null : null,
-          role === 'Teacher' ? cleanSubjects || null : null,
-          role === 'Student' ? cleanStudentNumber || null : null,
+          null,
+          null,
+          null,
+          null,
         ]
       )
       if (role === 'School Admin') {
@@ -418,9 +657,6 @@ export async function createUser(req, res, next) {
           'INSERT INTO school_admin_assignments (school_id, user_id, assigned_by) VALUES (?, ?, ?)',
           [schoolId, result.insertId, req.user.id]
         )
-      }
-      if (role === 'Teacher') {
-        await replaceTeacherClassAssignments(connection, result.insertId, schoolId, teacherAssignments)
       }
       await connection.execute(
         `INSERT INTO activity_logs (actor_id, actor_role, action, module, details)
@@ -434,12 +670,12 @@ export async function createUser(req, res, next) {
         email: cleanEmail,
         role,
         schoolId: Number(schoolId),
-        gradeLevel: role === 'Student' ? gradeLevel : 'N/A',
-        section: role === 'Student' ? cleanSection : null,
-        department: role === 'Teacher' ? cleanDepartment || null : null,
-        subjects: role === 'Teacher' ? cleanSubjects || null : null,
-        classAssignments: role === 'Teacher' ? teacherAssignments : [],
-        studentNumber: role === 'Student' ? cleanStudentNumber || null : null,
+        gradeLevel: 'N/A',
+        section: null,
+        department: null,
+        subjects: null,
+        classAssignments: [],
+        studentNumber: null,
         isActive: true,
       })
     } catch (error) {
@@ -473,6 +709,9 @@ export async function updateUser(req, res, next) {
     if (!targets.length) return res.status(404).json({ message: 'User not found.' })
     if (isProtectedDefaultAdminUser(targets[0])) {
       return res.status(403).json({ message: 'The default Super Admin account is protected and cannot be modified.' })
+    }
+    if (req.user.role === 'Super Admin' && role !== undefined) {
+      return res.status(403).json({ message: 'Super Admins may create School Admin accounts; staff roles must be assigned through School Admin workflows.' })
     }
     if (req.user.role === 'School Admin') {
       if (role === undefined || isActive !== undefined
@@ -735,7 +974,7 @@ export async function getSetup(req, res, next) {
     if (isSchoolAdmin) {
       const [rows] = await pool.execute(
         `SELECT id AS school_id, name AS school_name, code AS school_code, region, zone, wereda,
-                contact_details, contact, stamp_path, logo_path
+                contact_details, contact, stamp_path, logo_path, signature_path
          FROM schools WHERE id = ? LIMIT 1`,
         [schoolId]
       )
@@ -770,7 +1009,7 @@ export async function saveSetup(req, res, next) {
   }
   const isSchoolAdmin = req.user.role === 'School Admin'
   const allowedSettings = isSchoolAdmin
-    ? ['school_name', 'region', 'zone', 'wereda', 'contact_details', 'contact', 'stamp_path', 'logo_path']
+    ? ['school_name', 'region', 'zone', 'wereda', 'contact_details', 'contact', 'stamp_path', 'logo_path', 'signature_path']
     : ['school_id', 'region', 'wereda', 'school_name', 'stamp_path', 'logo_path']
   if (Object.entries(school).some(([key, value]) => !allowedSettings.includes(key)
     || typeof value !== 'string' || value.length > 1000)) {
@@ -782,7 +1021,7 @@ export async function saveSetup(req, res, next) {
   }
   if (isSchoolAdmin && (['region', 'zone', 'wereda'].some((key) => (school[key] || '').length > 100)
     || ['contact', 'contact_details'].some((key) => (school[key] || '').length > 255)
-    || ['stamp_path', 'logo_path'].some((key) => (school[key] || '').length > 500))) {
+    || ['stamp_path', 'logo_path', 'signature_path'].some((key) => (school[key] || '').length > 500))) {
     return res.status(400).json({ message: 'School metadata exceeds the allowed field lengths.' })
   }
   let connection
@@ -856,6 +1095,10 @@ export async function saveSetup(req, res, next) {
         schoolUpdates.push('stamp_path = ?', 'stamp_url = ?')
         schoolValues.push(school.stamp_path, school.stamp_path)
       }
+      if (Object.hasOwn(school, 'signature_path')) {
+        schoolUpdates.push('signature_path = ?')
+        schoolValues.push(school.signature_path)
+      }
       if (schoolUpdates.length) {
         await connection.execute(
           `UPDATE schools SET ${schoolUpdates.join(', ')} WHERE id = ?`,
@@ -881,11 +1124,11 @@ export async function saveSetup(req, res, next) {
 
 export async function uploadSchoolAsset(req, res, next) {
   const assetType = req.body?.assetType
-  if (!req.file || !['logo', 'stamp'].includes(assetType)) {
+  if (!req.file || !['logo', 'stamp', 'signature'].includes(assetType)) {
     if (req.file) await fs.unlink(req.file.path)
-    return res.status(400).json({ message: 'Select a school logo or official stamp image.' })
+    return res.status(400).json({ message: 'Select a school logo, official stamp, or principal signature image.' })
   }
-  const settingKey = assetType === 'logo' ? 'logo_path' : 'stamp_path'
+  const settingKey = assetType === 'logo' ? 'logo_path' : assetType === 'stamp' ? 'stamp_path' : 'signature_path'
   const publicPath = `/uploads/school-assets/${req.file.filename}`
   try {
     if (req.user.role === 'School Admin') {
@@ -894,10 +1137,11 @@ export async function uploadSchoolAsset(req, res, next) {
         await fs.unlink(req.file.path)
         return res.status(403).json({ message: 'Your account is not assigned to a school.' })
       }
-      const columns = assetType === 'logo' ? ['logo_path', 'logo_url'] : ['stamp_path', 'stamp_url']
+      const columns = assetType === 'logo' ? ['logo_path', 'logo_url']
+        : assetType === 'stamp' ? ['stamp_path', 'stamp_url'] : ['signature_path']
       const [result] = await pool.execute(
-        `UPDATE schools SET ${columns[0]} = ?, ${columns[1]} = ? WHERE id = ?`,
-        [publicPath, publicPath, schoolId]
+        `UPDATE schools SET ${columns[0]} = ?${columns[1] ? `, ${columns[1]} = ?` : ''} WHERE id = ?`,
+        columns[1] ? [publicPath, publicPath, schoolId] : [publicPath, schoolId]
       )
       if (!result.affectedRows) {
         await fs.unlink(req.file.path)

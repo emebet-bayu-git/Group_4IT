@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useTranslation } from '../i18n/I18nContext.jsx'
 
 const fallbackImage = 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=1200&auto=format&fit=crop'
 
@@ -10,6 +11,7 @@ const defaultSlides = [
 ]
 
 export default function HeroCarousel({ slides = defaultSlides, interval = 5000, variant = 'default' }) {
+  const { t } = useTranslation()
   const [activeIndex, setActiveIndex] = useState(0)
   const [loadedSlides, setLoadedSlides] = useState({})
   const [failedSlides, setFailedSlides] = useState({})
@@ -49,17 +51,17 @@ export default function HeroCarousel({ slides = defaultSlides, interval = 5000, 
     : 'relative aspect-[16/10] overflow-hidden rounded-lg border border-slate-200 bg-slate-200 shadow-[0_24px_70px_-30px_rgba(15,23,42,0.35)]'
   return (
     <div className={containerClassName}>
-      {!currentLoaded && !currentFailed && <div className="absolute inset-0 z-20 animate-pulse bg-slate-200" aria-label="Loading school image" />}
-      {slides.map((slide, index) => <img key={slide.id} src={failedSlides[slide.id] ? fallbackImage : slide.imageUrl || fallbackImage} alt={slide.title || `School activity slide ${index + 1}`} className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${index === activeIndex ? 'opacity-100' : 'opacity-0'}`} onError={() => setFailedSlides((current) => ({ ...current, [slide.id]: true }))} />)}
-      {variant === 'hero' && current.title && <div className="absolute bottom-6 left-6 z-10 rounded-md bg-black/35 px-4 py-2 text-sm font-semibold tracking-wide text-white drop-shadow-md">{current.title}</div>}
-      <button onClick={previous} className={variant === 'hero' ? 'absolute left-4 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-black/25 p-3 text-white transition hover:bg-black/40' : 'absolute left-3 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-slate-800 shadow-sm hover:bg-white'} aria-label="Previous slide"><ChevronLeft className="h-5 w-5" /></button>
-      <button onClick={next} className={variant === 'hero' ? 'absolute right-4 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-black/25 p-3 text-white transition hover:bg-black/40' : 'absolute right-3 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-slate-800 shadow-sm hover:bg-white'} aria-label="Next slide"><ChevronRight className="h-5 w-5" /></button>
-      <div className={`absolute ${variant === 'hero' ? 'bottom-6 right-6' : 'bottom-3 right-4'} z-10 flex gap-2`} aria-label="Choose slide">
+      {!currentLoaded && !currentFailed && <div className="absolute inset-0 z-20 animate-pulse bg-slate-200" aria-label={t('Loading school image')} />}
+      {slides.map((slide, index) => <img key={slide.id} src={failedSlides[slide.id] ? fallbackImage : slide.imageUrl || fallbackImage} alt={t(slide.title || 'School activity slide {number}', { number: index + 1 })} className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${index === activeIndex ? 'opacity-100' : 'opacity-0'}`} onError={() => setFailedSlides((current) => ({ ...current, [slide.id]: true }))} />)}
+      {variant === 'hero' && current.title && <div className="absolute bottom-6 left-6 z-10 rounded-md bg-black/35 px-4 py-2 text-sm font-semibold tracking-wide text-white drop-shadow-md">{t(current.title)}</div>}
+      <button onClick={previous} className={variant === 'hero' ? 'absolute left-4 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-black/25 p-3 text-white transition hover:bg-black/40' : 'absolute left-3 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-slate-800 shadow-sm hover:bg-white'} aria-label={t('Previous slide')}><ChevronLeft className="h-5 w-5" /></button>
+      <button onClick={next} className={variant === 'hero' ? 'absolute right-4 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full bg-black/25 p-3 text-white transition hover:bg-black/40' : 'absolute right-3 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-slate-800 shadow-sm hover:bg-white'} aria-label={t('Next slide')}><ChevronRight className="h-5 w-5" /></button>
+      <div className={`absolute ${variant === 'hero' ? 'bottom-6 right-6' : 'bottom-3 right-4'} z-10 flex gap-2`} aria-label={t('Choose slide')}>
         {slides.map((slide, index) => (
           <button
             key={slide.id}
             onClick={() => goTo(index)}
-            aria-label={`Go to slide ${index + 1}`}
+            aria-label={t('Go to slide {number}', { number: index + 1 })}
             aria-current={index === activeIndex}
             className={`h-2 rounded-full transition-all ${index === activeIndex ? 'w-6 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'}`}
           />

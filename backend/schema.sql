@@ -5,6 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   full_name VARCHAR(100) NOT NULL,
   email VARCHAR(100) UNIQUE NOT NULL,
+  username VARCHAR(60) NULL,
+  phone VARCHAR(40) NULL,
+  avatar_path VARCHAR(500) NULL,
   password VARCHAR(255) NOT NULL,
   role ENUM(
     'Super Admin',
@@ -17,7 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     'Student'
   ) NOT NULL,
   grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12', 'N/A') DEFAULT 'N/A',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_users_username (username)
 );
 
 CREATE TABLE IF NOT EXISTS student_records (
@@ -30,10 +34,10 @@ CREATE TABLE IF NOT EXISTS student_records (
   guardian_phone VARCHAR(40) NOT NULL,
   guardian_email VARCHAR(100) NULL,
   address VARCHAR(1000) NOT NULL,
-  section VARCHAR(30) NOT NULL,
+  section VARCHAR(30) NULL,
   academic_year VARCHAR(20) NOT NULL,
   photo_path VARCHAR(500) NULL,
-  status ENUM('Active', 'Pending', 'Archived') NOT NULL DEFAULT 'Active',
+  status ENUM('Active', 'Pending', 'Archived', 'Unassigned') NOT NULL DEFAULT 'Active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_student_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

@@ -4,8 +4,10 @@ import AboutPage from './pages/AboutPage.jsx'
 import ContactPage from './pages/ContactPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import HomePage from './pages/HomePage.jsx'
-import LoginPage, { clearSession, readSessionUser } from './pages/LoginPage.jsx'
+import LoginPage, { clearSession, readSessionUser, updateSessionUser } from './pages/LoginPage.jsx'
 import MainLayout from './components/MainLayout.jsx'
+import { I18nProvider } from './i18n/I18nContext.jsx'
+import { Toaster } from 'react-hot-toast'
 
 const publicPaths = {
   home: '/',
@@ -18,7 +20,7 @@ function readPublicView() {
   return Object.keys(publicPaths).find((view) => publicPaths[view] === window.location.pathname) || 'home'
 }
 
-export default function App() {
+function AppContent() {
   const [authUser, setAuthUser] = useState(readSessionUser)
   const [publicView, setPublicView] = useState(readPublicView)
 
@@ -41,6 +43,7 @@ export default function App() {
       systemRole: data.systemRole,
       name: data.name,
       identifier: data.identifier || credentials.identifier,
+      avatarPath: data.avatarPath || '',
     }
     setAuthUser(user)
     return { ...data, ...user }
@@ -50,6 +53,15 @@ export default function App() {
     return (
       <DashboardPage
         user={authUser}
+        onUserUpdated={(profile) => {
+          updateSessionUser(profile)
+          setAuthUser((current) => ({
+            ...current,
+            name: profile.name,
+            identifier: String(profile.id),
+            avatarPath: profile.avatarPath || '',
+          }))
+        }}
         onLogout={() => {
           clearSession()
           setAuthUser(null)
@@ -73,5 +85,28 @@ export default function App() {
       {publicView === 'contact' && <ContactPage />}
       {publicView === 'home' && <HomePage />}
     </MainLayout>
+  )
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppContent />
+      <Toaster
+        position="top-right"
+        reverseOrder={false}
+        toastOptions={{
+          duration: 4000,
+          success: {
+            style: { background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' },
+            iconTheme: { primary: '#059669', secondary: '#ecfdf5' },
+          },
+          error: {
+            style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
+            iconTheme: { primary: '#dc2626', secondary: '#fef2f2' },
+          },
+        }}
+      />
+    </I18nProvider>
   )
 }

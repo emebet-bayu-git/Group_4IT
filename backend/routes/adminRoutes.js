@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import {
-  archiveStudent, assignStaffLeadershipRole, createDelegation, getDashboardStats, getHealth, getSecurityPolicy, getSetup, getSystemAccess,
-  createUser, deactivateSchoolStaffMember, getSchoolStaffMember, listArchivedStudents, listDelegations, listGraduatedStudents, listGraduationCandidates, listSchoolStaff, listUsers, markStudentGraduated, purgeArchivedStudent,
-  resetUserPassword, revokeDelegation, saveSecurityPolicy, saveSetup, unlockUser, uploadSchoolAsset,
+  archiveStudent, assignStaffLeadershipRole, createDelegation, createWoredaTeacher, getDashboardStats, getHealth, getSecurityPolicy, getSetup, getSystemAccess,
+  createUser, deactivateSchoolStaffMember, getSchoolStaffMember, getSystemStatus, listArchivedStudents, listDelegations, listGraduatedStudents, listGraduationCandidates, listSchoolAdmins, listSchoolStaff, listUsers, markStudentGraduated, purgeArchivedStudent,
+  resetUserPassword, revokeDelegation, saveSecurityPolicy, saveSetup, toggleSystemStatus, unlockUser, uploadSchoolAsset,
   updateSchoolStaffMember, updateUser, verifyTranscript,
 } from '../controllers/adminController.js'
 import { requireSuperAdmin, requireSystemAdmin } from '../middleware/systemAdminMiddleware.js'
@@ -35,6 +35,7 @@ router.use(authenticateUser)
 
 router.get('/access', authenticateUser, getSystemAccess)
 router.get('/dashboard-stats', authorizeRoles('School Admin'), getDashboardStats)
+router.post('/teachers/woreda', authorizeRoles('School Admin'), createWoredaTeacher)
 router.get('/schools', requireSuperAdmin, async (_req, res, next) => {
   try {
     const [rows] = await pool.execute(
@@ -129,6 +130,9 @@ router.get('/activity-logs', requireSuperAdmin, async (_req, res, next) => {
   }
 })
 router.get('/users', authorizeRoles('Super Admin', 'School Admin'), listUsers)
+router.get('/school-admins', requireSuperAdmin, listSchoolAdmins)
+router.get('/status', requireSuperAdmin, getSystemStatus)
+router.put('/toggle-status', requireSuperAdmin, toggleSystemStatus)
 router.post('/users', authorizeRoles('Super Admin', 'School Admin'), createUser)
 router.get('/staff', authorizeRoles('School Admin'), listSchoolStaff)
 router.get('/staff/:id', authorizeRoles('School Admin'), getSchoolStaffMember)

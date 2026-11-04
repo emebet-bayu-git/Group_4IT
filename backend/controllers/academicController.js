@@ -76,10 +76,13 @@ async function getAcademicSection(executor, sectionId, schoolId) {
     `SELECT section.id, section.grade_level AS gradeLevel,
             section.section_name AS sectionName, section.is_active AS isActive,
             section.academic_year_id AS academicYearId, year.name AS academicYear,
-            section.academic_term_id AS semesterId, semester.name AS semester
+            section.academic_term_id AS semesterId, semester.name AS semester,
+            section.homeroom_teacher_id AS homeroomTeacherId,
+            teacher.full_name AS homeroomTeacherName
      FROM school_sections section
      LEFT JOIN academic_years year ON year.id = section.academic_year_id AND year.school_id = section.school_id
      LEFT JOIN academic_terms semester ON semester.id = section.academic_term_id AND semester.school_id = section.school_id
+     LEFT JOIN users teacher ON teacher.id = section.homeroom_teacher_id
      WHERE section.id = ? AND section.school_id = ? LIMIT 1`,
     [sectionId, schoolId]
   )
@@ -94,10 +97,13 @@ export async function listAcademicSections(req, res, next) {
       `SELECT section.id, section.grade_level AS gradeLevel,
               section.section_name AS sectionName, section.is_active AS isActive,
               section.academic_year_id AS academicYearId, year.name AS academicYear,
-              section.academic_term_id AS semesterId, semester.name AS semester
+              section.academic_term_id AS semesterId, semester.name AS semester,
+              section.homeroom_teacher_id AS homeroomTeacherId,
+              teacher.full_name AS homeroomTeacherName
        FROM school_sections section
        LEFT JOIN academic_years year ON year.id = section.academic_year_id AND year.school_id = section.school_id
        LEFT JOIN academic_terms semester ON semester.id = section.academic_term_id AND semester.school_id = section.school_id
+       LEFT JOIN users teacher ON teacher.id = section.homeroom_teacher_id
        WHERE section.school_id = ?
        ORDER BY year.start_date DESC, semester.start_date DESC, section.grade_level, section.section_name`,
       [schoolId]
@@ -105,6 +111,74 @@ export async function listAcademicSections(req, res, next) {
     return res.json(sections.map((section) => ({ ...section, semester: formatSemesterName(section.semester) })))
   } catch (error) {
     return next(error)
+  }
+}
+
+export async function listAcademicTeachers(req, res, next) {
+  try {
+    const schoolId = await requireSchoolId(req, res)
+    if (!schoolId) return
+    const [teachers] = await pool.execute(
+      `SELECT id, full_name AS name FROM users
+       WHERE school_id = ? AND role = 'Teacher' AND is_active = TRUE
+       ORDER BY full_name`,
+      [schoolId]
+    )
+    return res.json(teachers)
+  } catch (error) {
+    return next(error)
+  }
+}
+
+export async function updateAcademicSectionAdvisor(req, res, next) {
+  if (!validId(req.params.id)) return res.status(400).json({ message: 'Provide a valid grade section ID.' })
+  const teacherId = req.body?.teacherId === '' || req.body?.teacherId === null
+    ? null
+    : req.body?.teacherId
+  if (teacherId !== null && !validId(teacherId)) {
+    return res.status(400).json({ message: 'Choose a valid homeroom teacher.' })
+  }
+  let connection
+  try {
+    const schoolId = await requireSchoolId(req, res)
+    if (!schoolId) return
+    const [[section]] = await pool.execute(
+      `SELECT id, academic_year_id AS academicYearId, academic_term_id AS academicTermId
+       FROM school_sections WHERE id = ? AND school_id = ? LIMIT 1`,
+      [req.params.id, schoolId]
+    )
+    if (!section) return res.status(404).json({ message: 'Grade section not found.' })
+    if (teacherId !== null) {
+      const [[teacher]] = await pool.execute(
+        `SELECT id FROM users
+         WHERE id = ? AND school_id = ? AND role = 'Teacher' AND is_active = TRUE LIMIT 1`,
+        [teacherId, schoolId]
+      )
+      if (!teacher) return res.status(400).json({ message: 'Choose an active teacher from your school.' })
+    }
+    connection = await pool.getConnection()
+    await connection.beginTransaction()
+    if (teacherId !== null) {
+      await connection.execute(
+        `UPDATE school_sections
+         SET homeroom_teacher_id = NULL
+         WHERE school_id = ? AND homeroom_teacher_id = ? AND id <> ?
+           AND ((academic_year_id = ? AND academic_term_id = ?)
+             OR (academic_year_id IS NULL AND academic_term_id IS NULL))`,
+        [schoolId, teacherId, req.params.id, section.academicYearId, section.academicTermId]
+      )
+    }
+    await connection.execute(
+      'UPDATE school_sections SET homeroom_teacher_id = ? WHERE id = ? AND school_id = ?',
+      [teacherId, req.params.id, schoolId]
+    )
+    await connection.commit()
+    return res.json(await getAcademicSection(pool, req.params.id, schoolId))
+  } catch (error) {
+    if (connection) await connection.rollback()
+    return next(error)
+  } finally {
+    connection?.release()
   }
 }
 

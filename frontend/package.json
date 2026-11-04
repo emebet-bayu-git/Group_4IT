@@ -13,13 +13,17 @@
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "react-hot-toast": "^2.6.1",
     "recharts": "latest"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "latest",
+    "@vitejs/plugin-react": "6.1.2",
     "autoprefixer": "latest",
     "postcss": "latest",
     "tailwindcss": "^3.4.17",
-    "vite": "latest"
+    "vite": "8.3.5"
+  },
+  "overrides": {
+    "rolldown": "1.2.15"
   }
 }

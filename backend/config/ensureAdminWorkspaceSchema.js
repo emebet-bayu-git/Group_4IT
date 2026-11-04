@@ -80,6 +80,7 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('users', 'registration_source', "ENUM('admin', 'registrar', 'pending') NOT NULL DEFAULT 'pending'")
   await ensureColumn('users', 'registered_by', 'INT NULL')
   await ensureColumn('users', 'school_id', 'INT NULL')
+  await ensureColumn('users', 'username', 'VARCHAR(60) NULL')
   await ensureColumn('users', 'section', 'VARCHAR(30) NULL')
   await ensureColumn('users', 'department', 'VARCHAR(100) NULL')
   await ensureColumn('users', 'subjects', 'TEXT NULL')
@@ -134,6 +135,7 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('schools', 'wereda', 'VARCHAR(100) NULL')
   await ensureColumn('schools', 'contact_details', 'VARCHAR(255) NULL')
   await ensureColumn('schools', 'stamp_path', 'VARCHAR(500) NULL')
+  await ensureColumn('schools', 'signature_path', 'VARCHAR(500) NULL')
   await ensureColumn('schools', 'logo_path', 'VARCHAR(500) NULL')
   await ensureColumn('schools', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
   const schoolColumns = new Set([
@@ -268,12 +270,98 @@ export async function ensureAdminWorkspaceSchema() {
     CONSTRAINT fk_teacher_assignment_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
     CONSTRAINT fk_teacher_assignment_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE
   )`)
+  const [usernameIndex] = await pool.execute(
+    `SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'users'
+       AND index_name = 'uq_users_username' LIMIT 1`
+  )
+  if (!usernameIndex.length) {
+    await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_users_username (username)')
+  }
+  await pool.query(`CREATE TABLE IF NOT EXISTS teachers (
+    id INT PRIMARY KEY,
+    school_id INT NOT NULL,
+    woreda_employee_id VARCHAR(50) NULL,
+    phone_number VARCHAR(40) NULL,
+    specialization VARCHAR(100) NULL,
+    qualification_degree VARCHAR(100) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_teacher_woreda_employee (school_id, woreda_employee_id),
+    INDEX idx_teachers_school (school_id, id),
+    CONSTRAINT fk_teacher_profile_user FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_profile_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
+  )`)
+  await ensureForeignKey(
+    'teachers',
+    'fk_teacher_profile_school',
+    'ALTER TABLE teachers ADD CONSTRAINT fk_teacher_profile_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE'
+  )
+  await pool.query(`CREATE TABLE IF NOT EXISTS school_subjects (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    school_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    UNIQUE KEY uq_school_subject_name (school_id, name),
+    CONSTRAINT fk_school_subject_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
+  )`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS teacher_subject_assignments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    teacher_id INT NOT NULL,
+    school_id INT NOT NULL,
+    subject_id INT NOT NULL,
+    grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NOT NULL,
+    section_id INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_teacher_subject_section (teacher_id, subject_id, section_id),
+    INDEX idx_teacher_subject_school (school_id, teacher_id, grade_level),
+    CONSTRAINT fk_teacher_subject_profile FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_catalog FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE
+  )`)
+  await ensureColumn('school_sections', 'homeroom_teacher_id', 'INT NULL')
+  await ensureForeignKey(
+    'school_sections',
+    'fk_school_section_homeroom_teacher',
+    'ALTER TABLE school_sections ADD CONSTRAINT fk_school_section_homeroom_teacher FOREIGN KEY (homeroom_teacher_id) REFERENCES users(id) ON DELETE SET NULL'
+  )
+  await pool.query(
+    `INSERT IGNORE INTO teachers (id, school_id, specialization)
+     SELECT id, school_id, department FROM users
+     WHERE role = 'Teacher' AND school_id IS NOT NULL`
+  )
+  await pool.query(
+    `INSERT INTO school_subjects (school_id, name)
+     SELECT DISTINCT assignment.school_id, TRIM(assignment.subject)
+     FROM teacher_class_assignments assignment
+     WHERE TRIM(assignment.subject) <> ''
+     ON DUPLICATE KEY UPDATE name = VALUES(name)`
+  )
+  await pool.query(
+    `INSERT IGNORE INTO teacher_subject_assignments
+       (teacher_id, school_id, subject_id, grade_level, section_id)
+     SELECT assignment.teacher_id, assignment.school_id, subject.id,
+            section.grade_level, section.id
+     FROM teacher_class_assignments assignment
+     JOIN teachers teacher ON teacher.id = assignment.teacher_id
+       AND teacher.school_id = assignment.school_id
+     JOIN school_sections section ON section.id = assignment.section_id
+       AND section.school_id = assignment.school_id
+     JOIN school_subjects subject ON subject.school_id = assignment.school_id
+       AND subject.name = TRIM(assignment.subject)`
+  )
   await pool.query(`CREATE TABLE IF NOT EXISTS school_settings (
     setting_key VARCHAR(60) PRIMARY KEY,
     setting_value TEXT NULL,
     school_id INT NOT NULL DEFAULT 1,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   )`)
+  await pool.query(
+    `INSERT INTO school_settings (setting_key, setting_value, school_id) VALUES
+     ('is_system_active', 'true', 1),
+     ('closure_message', '', 1)
+     ON DUPLICATE KEY UPDATE setting_key = VALUES(setting_key)`
+  )
   await ensureColumn('academic_years', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureColumn('academic_terms', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureColumn('academic_terms', 'is_active', 'BOOLEAN NOT NULL DEFAULT FALSE')
@@ -304,10 +392,10 @@ export async function ensureAdminWorkspaceSchema() {
     guardian_phone VARCHAR(40) NOT NULL,
     guardian_email VARCHAR(100) NULL,
     address VARCHAR(1000) NOT NULL,
-    section VARCHAR(30) NOT NULL,
+    section VARCHAR(30) NULL,
     academic_year VARCHAR(20) NOT NULL,
     photo_path VARCHAR(500) NULL,
-    status ENUM('Active', 'Pending', 'Archived') NOT NULL DEFAULT 'Active',
+    status ENUM('Active', 'Pending', 'Archived', 'Unassigned') NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_student_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`)
@@ -321,7 +409,7 @@ export async function ensureAdminWorkspaceSchema() {
     date_of_birth DATE NOT NULL,
     grade ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NULL,
     grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NOT NULL,
-    section VARCHAR(30) NOT NULL,
+    section VARCHAR(30) NULL,
     gender ENUM('Female', 'Male') NULL,
     previous_school VARCHAR(200) NULL,
     region VARCHAR(100) NULL,
@@ -344,7 +432,7 @@ export async function ensureAdminWorkspaceSchema() {
     parent_photo_url VARCHAR(500) NULL,
     academic_year VARCHAR(20) NULL,
     registration_date DATE NULL,
-    status ENUM('Active', 'Pending', 'Archived') NOT NULL DEFAULT 'Active',
+    status ENUM('Active', 'Pending', 'Archived', 'Unassigned') NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_students_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
@@ -366,6 +454,27 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('students', 'grade', "ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NULL")
   await ensureColumn('students', 'grade_level', 'VARCHAR(20) NULL')
   await ensureColumn('students', 'section', 'VARCHAR(30) NULL')
+  await ensureColumn('students', 'section_id', 'INT NULL')
+  await ensureColumn('students', 'academic_status', "VARCHAR(50) NOT NULL DEFAULT 'Enrolled'")
+  await ensureColumn('students', 'section_status', "VARCHAR(50) NOT NULL DEFAULT 'Pending Check-In'")
+  await ensureColumn('students', 'enrollment_year_id', 'INT NULL')
+  await ensureColumn('students', 'promoted_from_year_id', 'INT NULL')
+  await pool.query("ALTER TABLE students MODIFY section VARCHAR(30) NULL")
+  await ensureForeignKey(
+    'students',
+    'fk_student_section',
+    'ALTER TABLE students ADD CONSTRAINT fk_student_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE SET NULL'
+  )
+  await ensureForeignKey(
+    'students',
+    'fk_student_enrollment_year',
+    'ALTER TABLE students ADD CONSTRAINT fk_student_enrollment_year FOREIGN KEY (enrollment_year_id) REFERENCES academic_years(id) ON DELETE SET NULL'
+  )
+  await ensureForeignKey(
+    'students',
+    'fk_student_promoted_from_year',
+    'ALTER TABLE students ADD CONSTRAINT fk_student_promoted_from_year FOREIGN KEY (promoted_from_year_id) REFERENCES academic_years(id) ON DELETE SET NULL'
+  )
   await ensureColumn('students', 'gender', "ENUM('Female', 'Male') NULL")
   await ensureColumn('students', 'previous_school', 'VARCHAR(200) NULL')
   await ensureColumn('students', 'region', 'VARCHAR(100) NULL')
@@ -389,6 +498,7 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('students', 'academic_year', 'VARCHAR(20) NULL')
   await ensureColumn('students', 'registration_date', 'DATE NULL')
   await ensureColumn('students', 'status', "ENUM('Active', 'Pending', 'Archived') NOT NULL DEFAULT 'Active'")
+  await pool.query("ALTER TABLE students MODIFY status ENUM('Active', 'Pending', 'Archived', 'Unassigned') NOT NULL DEFAULT 'Active'")
   await ensureColumn('students', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP')
   await pool.query(
     `UPDATE students
@@ -426,15 +536,63 @@ export async function ensureAdminWorkspaceSchema() {
        AND u.grade_level IN ('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12')
        AND NOT EXISTS (SELECT 1 FROM students existing WHERE existing.user_id = u.id)`
   )
+  await pool.query(
+    `UPDATE students student
+     SET student.section_id = (
+       SELECT section.id FROM school_sections section
+       WHERE section.school_id = student.school_id
+         AND section.grade_level = COALESCE(student.grade, student.grade_level)
+         AND section.section_name = student.section AND section.is_active = TRUE
+       ORDER BY section.academic_year_id DESC, section.academic_term_id DESC, section.id DESC
+       LIMIT 1
+     )
+     WHERE student.section_id IS NULL AND student.section IS NOT NULL`
+  )
+  await ensureColumn('student_records', 'section', 'VARCHAR(30) NULL')
+  await ensureColumn('student_records', 'status', "ENUM('Active', 'Pending', 'Archived') NOT NULL DEFAULT 'Active'")
+  await pool.query("ALTER TABLE student_records MODIFY section VARCHAR(30) NULL")
+  await pool.query("ALTER TABLE student_records MODIFY status ENUM('Active', 'Pending', 'Archived', 'Unassigned') NOT NULL DEFAULT 'Active'")
+  await pool.query(
+    `UPDATE students student
+     LEFT JOIN school_sections section ON section.id = student.section_id
+     LEFT JOIN academic_years activeYear ON activeYear.school_id = student.school_id AND activeYear.is_active = TRUE
+     SET student.academic_status = COALESCE(NULLIF(student.academic_status, ''), 'Enrolled'),
+         student.section_status = CASE
+           WHEN student.section_id IS NOT NULL THEN 'Confirmed / Enrolled'
+           WHEN student.status = 'Unassigned'
+             AND student.academic_status LIKE 'Promoted to %' THEN 'Pending Re-Enrollment'
+           WHEN student.status = 'Unassigned' THEN 'Pending Check-In'
+           ELSE COALESCE(NULLIF(student.section_status, ''), 'Pending Check-In')
+         END,
+         student.enrollment_year_id = CASE
+           WHEN student.section_id IS NOT NULL
+             THEN COALESCE(student.enrollment_year_id, section.academic_year_id, activeYear.id)
+           ELSE student.enrollment_year_id
+         END
+     WHERE student.section_status = 'Pending Check-In'
+       OR student.academic_status IS NULL OR student.academic_status = ''
+       OR (student.section_id IS NOT NULL AND student.enrollment_year_id IS NULL)`
+  )
+  await pool.query('UPDATE students SET section = NULL WHERE section_id IS NULL')
+  await pool.query(
+    `UPDATE students SET status = 'Unassigned'
+     WHERE section_id IS NULL AND status = 'Active'`
+  )
+  await pool.query(
+    `UPDATE student_records records
+     JOIN students student ON student.user_id = records.user_id
+     SET records.section = student.section, records.status = student.status
+     WHERE student.section_id IS NULL`
+  )
   await ensureColumn('student_records', 'graduated_at', 'DATETIME NULL')
   await pool.query(
     `UPDATE users u
-     JOIN student_records s ON s.user_id = u.id
+     JOIN students student ON student.user_id = u.id AND student.school_id = u.school_id
      SET u.registration_source = 'registrar'
      WHERE u.role = 'Student'
        AND u.is_active = TRUE
        AND u.registration_source = 'pending'
-       AND s.status = 'Active'`
+       AND student.status IN ('Active', 'Unassigned')`
   )
 
   await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -519,4 +677,73 @@ export async function ensureAdminWorkspaceSchema() {
     CONSTRAINT fk_student_grade_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE,
     CONSTRAINT fk_student_grade_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE RESTRICT
   )`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS section_result_submissions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    section_id INT NOT NULL,
+    school_id INT NOT NULL,
+    academic_year_id INT NOT NULL,
+    term_id INT NOT NULL,
+    status ENUM('submitted', 'published') NOT NULL DEFAULT 'submitted',
+    submitted_by INT NOT NULL,
+    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_by INT NULL,
+    published_at TIMESTAMP NULL,
+    UNIQUE KEY uq_section_result_submission_period (section_id, academic_year_id, term_id),
+    INDEX idx_section_result_submissions_school_status (school_id, status, submitted_at),
+    CONSTRAINT fk_section_submission_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_submission_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_submission_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_submission_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_submission_submitter FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_section_submission_publisher FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE RESTRICT
+  )`)
+  await pool.query("ALTER TABLE section_result_submissions MODIFY status ENUM('submitted', 'approved', 'published') NOT NULL DEFAULT 'submitted'")
+  await ensureColumn('section_result_submissions', 'approved_by', 'INT NULL')
+  await ensureColumn('section_result_submissions', 'approved_at', 'TIMESTAMP NULL')
+  await ensureColumn('section_result_submissions', 'approval_stamp_path', 'VARCHAR(500) NULL')
+  await ensureColumn('section_result_submissions', 'approval_signature_path', 'VARCHAR(500) NULL')
+  await ensureColumn('section_result_submissions', 'approval_name', 'VARCHAR(150) NULL')
+  await ensureForeignKey(
+    'section_result_submissions',
+    'fk_section_submission_approver',
+    'ALTER TABLE section_result_submissions ADD CONSTRAINT fk_section_submission_approver FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE RESTRICT'
+  )
+  await ensureForeignKey(
+    'section_result_submissions',
+    'fk_section_submission_school',
+    'ALTER TABLE section_result_submissions ADD CONSTRAINT fk_section_submission_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE'
+  )
+  await pool.query(`CREATE TABLE IF NOT EXISTS permanent_academic_records (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    school_id INT NOT NULL,
+    student_id INT NOT NULL,
+    student_name VARCHAR(150) NOT NULL,
+    student_number VARCHAR(50) NULL,
+    grade_level VARCHAR(30) NOT NULL,
+    section_name VARCHAR(30) NOT NULL,
+    assignment_id BIGINT NOT NULL,
+    subject VARCHAR(100) NOT NULL,
+    academic_year_id INT NOT NULL,
+    term_id INT NOT NULL,
+    academic_year VARCHAR(20) NOT NULL,
+    semester VARCHAR(40) NOT NULL,
+    assessment_40 DECIMAL(5,2) NOT NULL,
+    final_60 DECIMAL(5,2) NOT NULL,
+    total_100 DECIMAL(5,2) NOT NULL,
+    grade_point DECIMAL(3,2) NOT NULL,
+    sgpa DECIMAL(3,2) NOT NULL,
+    cgpa DECIMAL(3,2) NOT NULL,
+    school_name VARCHAR(150) NOT NULL,
+    stamp_path VARCHAR(500) NULL,
+    signature_path VARCHAR(500) NULL,
+    principal_name VARCHAR(150) NOT NULL,
+    approved_by INT NOT NULL,
+    approved_at DATETIME NOT NULL,
+    source_submission_id BIGINT NOT NULL,
+    archived_by INT NOT NULL,
+    archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_permanent_student_subject_term (school_id, student_id, assignment_id, academic_year_id, term_id),
+    INDEX idx_permanent_student_history (school_id, student_id, archived_at),
+    INDEX idx_permanent_school_period (school_id, academic_year_id, term_id)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
 }

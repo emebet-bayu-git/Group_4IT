@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 import { BookOpen, CalendarCheck, FileText, LockKeyhole, Users, GraduationCap } from 'lucide-react'
 import HeroCarousel from '../components/HeroCarousel.jsx'
+import { useTranslation } from '../i18n/I18nContext.jsx'
 
 const quickFeatures = [
   {
@@ -79,6 +80,7 @@ const fallbackImages = [
 ]
 
 export default function HomePage() {
+  const { t } = useTranslation()
   const [homeImages, setHomeImages] = useState(fallbackImages)
 
   useEffect(() => {
@@ -107,13 +109,13 @@ export default function HomePage() {
           />
         </header>
 
-        <section className="bg-emerald-700 px-6 py-8 text-white shadow-inner" aria-label="School statistics">
+        <section className="bg-emerald-700 px-6 py-8 text-white shadow-inner" aria-label={t('School statistics')}>
           <div className="mx-auto grid max-w-7xl grid-cols-2 gap-6 text-center md:grid-cols-4">
             {schoolStats.map(({ value, label, icon: Icon }) => (
               <div key={label}>
                 <Icon className="mx-auto mb-2 h-6 w-6 text-emerald-100" aria-hidden="true" />
                 <p className="text-3xl font-bold">{value}</p>
-                <p className="mt-1 text-sm text-emerald-100">{label}</p>
+                <p className="mt-1 text-sm text-emerald-100">{t(label)}</p>
               </div>
             ))}
           </div>
@@ -121,15 +123,15 @@ export default function HomePage() {
 
         <section id="announcements" className="mx-auto max-w-7xl px-6 py-16 sm:py-20">
           <div className="mb-12 text-center">
-            <h1 className="text-3xl font-extrabold text-slate-900 md:text-4xl">Secondary School Announcements</h1>
-            <p className="mt-2 text-slate-600">Stay updated with grade-level notices, department schedules, and high school events.</p>
+            <h1 className="text-3xl font-extrabold text-slate-900 md:text-4xl">{t('Secondary School Announcements')}</h1>
+            <p className="mt-2 text-slate-600">{t('Stay updated with grade-level notices, department schedules, and high school events.')}</p>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
             {announcements.map(({ date, title, description, accentClass, dateClass }) => (
               <article key={title} className={`rounded-xl border border-slate-200 border-t-4 ${accentClass} bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg`}>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${dateClass}`}>{date}</span>
-                <h2 className="mb-2 mt-4 text-xl font-bold text-slate-900">{title}</h2>
-                <p className="text-sm leading-6 text-slate-600">{description}</p>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${dateClass}`}>{t(date)}</span>
+                  <h2 className="mb-2 mt-4 text-xl font-bold text-slate-900">{t(title)}</h2>
+                  <p className="text-sm leading-6 text-slate-600">{t(description)}</p>
               </article>
             ))}
           </div>
@@ -138,9 +140,9 @@ export default function HomePage() {
         <section id="features" className="bg-slate-100 px-6 py-16 sm:py-20">
           <div className="mx-auto max-w-7xl">
             <div className="mb-12 text-center">
-              <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">Designed for the school community</p>
-              <h2 className="mt-3 text-3xl font-extrabold text-slate-900 md:text-4xl">Student Information System Features</h2>
-              <p className="mt-2 text-slate-600">Tailored for secondary school administration, teachers, and grade 9–12 students.</p>
+              <p className="text-sm font-bold uppercase tracking-[0.16em] text-emerald-700">{t('Designed for the school community')}</p>
+              <h2 className="mt-3 text-3xl font-extrabold text-slate-900 md:text-4xl">{t('Student Information System Features')}</h2>
+              <p className="mt-2 text-slate-600">{t('Tailored for secondary school administration, teachers, and grade 9–12 students.')}</p>
             </div>
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
               {quickFeatures.map(({ title, description, icon: Icon }) => (
@@ -148,8 +150,8 @@ export default function HomePage() {
                   <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-emerald-50 text-emerald-700">
                     <Icon className="h-6 w-6" aria-hidden="true" />
                   </span>
-                  <h3 className="mb-1 mt-4 font-bold text-slate-900">{title}</h3>
-                  <p className="text-sm leading-6 text-slate-600">{description}</p>
+                  <h3 className="mb-1 mt-4 font-bold text-slate-900">{t(title)}</h3>
+                  <p className="text-sm leading-6 text-slate-600">{t(description)}</p>
                 </article>
               ))}
             </div>

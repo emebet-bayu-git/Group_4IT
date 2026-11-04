@@ -6,12 +6,14 @@ export async function login(req, res, next) {
   const { identifier, studentId, password } = req.body ?? {}
   const normalizedId = String(identifier ?? studentId ?? '').trim()
   const normalizedEmail = normalizedId.toLowerCase()
+  const normalizedUsername = normalizedId.toLowerCase()
   const numericId = Number(normalizedId)
 
   const isNumericId = /^\d+$/.test(normalizedId) && Number.isSafeInteger(numericId) && numericId > 0
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-  if ((!isNumericId && !isEmail) || typeof password !== 'string' || !password) {
-    return res.status(400).json({ message: 'Enter a valid email address or school ID and password.' })
+  const isUsername = /^[a-zA-Z0-9._-]{3,60}$/.test(normalizedId)
+  if ((!isNumericId && !isEmail && !isUsername) || typeof password !== 'string' || !password) {
+    return res.status(400).json({ message: 'Enter a valid email address, username, or school ID and password.' })
   }
 
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || process.env.JWT_SECRET.startsWith('replace-with-')) {
@@ -20,17 +22,34 @@ export async function login(req, res, next) {
 
   try {
     const [users] = await pool.execute(
-      `SELECT id, full_name, password, role, is_active, failed_login_attempts,
+      `SELECT id, full_name, password, role, avatar_path, is_active, failed_login_attempts,
               locked_until, token_version, registration_source
        FROM users
-       WHERE email = ? OR (? = TRUE AND id = ?)
-       ORDER BY (email = ?) DESC
+       WHERE email = ? OR username = ? OR (? = TRUE AND id = ?)
+       ORDER BY (email = ? OR username = ?) DESC
        LIMIT 1`,
-      [normalizedEmail, isNumericId, isNumericId ? numericId : 0, normalizedEmail]
+      [normalizedEmail, normalizedUsername, isNumericId, isNumericId ? numericId : 0,
+        normalizedEmail, normalizedUsername]
     )
     const user = users[0]
     if (!user || !user.is_active || !['admin', 'registrar'].includes(user.registration_source)) {
       return res.status(403).json({ message: 'Account not authorized or pending admin registration' })
+    }
+    if (user.role !== 'Super Admin') {
+      const [statusRows] = await pool.execute(
+        `SELECT setting_value FROM school_settings
+         WHERE setting_key = 'is_system_active' AND school_id = 1 LIMIT 1`
+      )
+      if (statusRows[0]?.setting_value === 'false') {
+        const [messageRows] = await pool.execute(
+          `SELECT setting_value FROM school_settings
+           WHERE setting_key = 'closure_message' AND school_id = 1 LIMIT 1`
+        )
+        return res.status(503).json({
+          message: messageRows[0]?.setting_value?.trim()
+            || 'The regional SIMS is temporarily closed for maintenance.',
+        })
+      }
     }
     if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
       return res.status(423).json({ message: 'This account is temporarily locked after failed sign-in attempts.' })
@@ -73,6 +92,7 @@ export async function login(req, res, next) {
       systemRole: user.role,
       name: user.full_name,
       identifier: String(user.id),
+      avatarPath: user.avatar_path,
     })
   } catch (error) {
     return next(error)

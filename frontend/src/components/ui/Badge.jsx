@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTranslation } from '../../i18n/I18nContext.jsx'
 
 const styles = {
   Active: 'bg-success-50 text-success-700 ring-success-500/20',
@@ -8,6 +9,7 @@ const styles = {
 }
 
 export default function StatusBadge({ status }) {
+  const { t } = useTranslation()
   const normalized = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${styles[normalized] ?? styles.Active}`}><span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current opacity-70" />{normalized}</span>
+  return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${styles[normalized] ?? styles.Active}`}><span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current opacity-70" />{t(normalized)}</span>
 }
