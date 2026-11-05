@@ -8,9 +8,11 @@ import {
 import { authenticateUser, authorizeRoles } from '../middleware/authMiddleware.js'
 
 const router = Router()
-router.use(authenticateUser, authorizeRoles('School Admin'))
+router.use(authenticateUser)
 
-router.get('/active', getActiveAcademicPeriod)
+router.get('/active-year', authorizeRoles('School Admin', 'Registrar'), getActiveAcademicPeriod)
+router.get('/active', authorizeRoles('School Admin', 'Registrar'), getActiveAcademicPeriod)
+router.use(authorizeRoles('School Admin'))
 router.get('/years', listAcademicYears)
 router.post('/years', createAcademicYear)
 router.put('/years/:id', updateAcademicYear)

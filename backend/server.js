@@ -42,6 +42,7 @@ app.use('/api', (_req, res, next) => {
 app.use('/api/auth', authRoutes)
 app.use('/api/schools', schoolRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/school-admin', adminRoutes)
 app.use('/api/system-admin', adminRoutes)
 app.use('/api/academic', academicRoutes)
 app.use('/api', dashboardRoutes)

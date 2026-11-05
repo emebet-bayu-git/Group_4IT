@@ -22,10 +22,10 @@ const initialData = {
   phoneNumber: '', previousSchool: '', guardianName: '', guardianRelation: '', guardianPhone: '',
   guardianEmail: '', emergencyContactName: '', emergencyContactPhone: '',
   region: '', zone: '', woreda: '', kebele: '', houseNo: '',
-  grade: '', section: '', academicYear: '2026/2027', registrationDate: getTodayDate(),
+  grade: '', section: '', academicYear: '', registrationDate: getTodayDate(),
 }
 const fallbackAcademicOptions = {
-  years: ['2026/2027', '2027/2028'],
+  years: [],
   sections: ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].flatMap((gradeLevel) => (
     ['Section A', 'Section B', 'Section C'].map((sectionName) => ({ gradeLevel, sectionName }))
   )),
@@ -72,18 +72,60 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
     }).then(({ data }) => {
       if (!active) return
       setAcademicOptions(data)
-      setData((current) => ({
-        ...current,
-        academicYear: data.years.includes(current.academicYear) ? current.academicYear : data.years[0] || '',
-        section: data.sections.some((section) => section.gradeLevel === current.grade && section.sectionName === current.section)
-          ? current.section
-          : '',
-      }))
+      const token = readSessionToken()
+      axios.get('/api/academic/active-year', {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(({ data: activePeriod }) => {
+        if (!active) return
+        setData((current) => ({
+          ...current,
+          academicYear: student?.academicYear || activePeriod?.academicYear || data.years[0] || '',
+          section: data.sections.some((section) => section.gradeLevel === current.grade && section.sectionName === current.section)
+            ? current.section
+            : '',
+        }))
+      }).catch(() => {
+        if (!active) return
+        setData((current) => ({
+          ...current,
+          academicYear: student?.academicYear || data.years[0] || '',
+          section: '',
+        }))
+      })
     }).catch((error) => {
       if (active) toast.error(t(error.response?.data?.message || 'Unable to load current academic assignments.'))
     })
     return () => { active = false }
   }, [])
+  useEffect(() => {
+    const refreshActiveAcademicContext = async () => {
+      if (student) return
+      try {
+        const token = readSessionToken()
+        const [{ data: activePeriod }, { data: options }] = await Promise.all([
+          axios.get('/api/academic/active-year', { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get('/api/academic-options', { headers: { Authorization: `Bearer ${token}` } }),
+        ])
+        setAcademicOptions(options)
+        setData((current) => ({
+          ...current,
+          academicYear: activePeriod?.academicYear || options.years?.[0] || '',
+        }))
+      } catch (error) {
+        toast.error(t(error.response?.data?.message || 'Unable to refresh the active academic year.'))
+      }
+    }
+    window.addEventListener('academic-context-changed', refreshActiveAcademicContext)
+    let channel
+    if ('BroadcastChannel' in window) {
+      channel = new BroadcastChannel('academic-context')
+      channel.addEventListener('message', refreshActiveAcademicContext)
+    }
+    return () => {
+      window.removeEventListener('academic-context-changed', refreshActiveAcademicContext)
+      channel?.close()
+    }
+  }, [student, t])
   useEffect(() => {
     if (!data.photoFile) return undefined
     const previewUrl = URL.createObjectURL(data.photoFile)

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import {
   archiveStudent, assignStaffLeadershipRole, createDelegation, createWoredaTeacher, getDashboardStats, getHealth, getSecurityPolicy, getSetup, getSystemAccess,
-  createUser, deactivateSchoolStaffMember, getSchoolStaffMember, getSystemStatus, listArchivedStudents, listDelegations, listGraduatedStudents, listGraduationCandidates, listSchoolAdmins, listSchoolStaff, listUsers, markStudentGraduated, purgeArchivedStudent,
+  createUser, deleteSchoolStaffMember, getSchoolStaffMember, getSystemStatus, listArchivedStudents, listDelegations, listGraduatedStudents, listGraduationCandidates, listSchoolAdmins, listSchoolStaff, listUsers, markStudentGraduated, purgeArchivedStudent,
   resetUserPassword, revokeDelegation, saveSecurityPolicy, saveSetup, toggleSystemStatus, unlockUser, uploadSchoolAsset,
   updateSchoolStaffMember, updateUser, verifyTranscript,
 } from '../controllers/adminController.js'
@@ -137,7 +137,7 @@ router.post('/users', authorizeRoles('Super Admin', 'School Admin'), createUser)
 router.get('/staff', authorizeRoles('School Admin'), listSchoolStaff)
 router.get('/staff/:id', authorizeRoles('School Admin'), getSchoolStaffMember)
 router.put('/staff/:id', authorizeRoles('School Admin'), updateSchoolStaffMember)
-router.delete('/staff/:id', authorizeRoles('School Admin'), deactivateSchoolStaffMember)
+router.delete('/staff/:id', authorizeRoles('School Admin'), deleteSchoolStaffMember)
 router.post('/users/:id/assign-role', authorizeRoles('School Admin'), assignStaffLeadershipRole)
 router.patch('/users/:id', authorizeRoles('Super Admin', 'School Admin'), updateUser)
 router.post('/users/:id/reset-password', requireSystemAdmin('users'), resetUserPassword)

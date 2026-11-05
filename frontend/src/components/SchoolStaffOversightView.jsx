@@ -37,6 +37,7 @@ export default function SchoolStaffOversightView() {
   const [viewStaff, setViewStaff] = useState(null)
   const [editStaff, setEditStaff] = useState(null)
   const [editForm, setEditForm] = useState(emptyStaff)
+  const [deleteStaff, setDeleteStaff] = useState(null)
   const tokenHeaders = () => ({ Authorization: `Bearer ${readSessionToken()}` })
 
   const loadStaff = async () => {
@@ -105,28 +106,17 @@ export default function SchoolStaffOversightView() {
     }
   }
 
-  const deactivateStaff = async (member) => {
-    if (!window.confirm(t("Deactivate {name}'s account? They will no longer be able to sign in.", { name: member.name }))) return
+  const permanentlyDeleteStaff = async () => {
+    if (!deleteStaff) return
+    const targetId = deleteStaff.id
     setBusy(true)
     try {
-      await axios.delete(`/api/admin/staff/${member.id}`, { headers: tokenHeaders() })
-      toast.success(t('Staff account deactivated.'))
-      await loadStaff()
+      await axios.delete(`/api/school-admin/staff/${targetId}`, { headers: tokenHeaders() })
+      setStaff(prevList => prevList.filter(user => user.id !== targetId))
+      setDeleteStaff(null)
+      toast.success(t('Staff member permanently deleted from database.'))
     } catch (requestError) {
-      toast.error(t(requestError.response?.data?.message || 'Unable to deactivate staff member.'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const toggleStaffStatus = async (member) => {
-    setBusy(true)
-    try {
-      await axios.put(`/api/admin/staff/${member.id}`, { isActive: !member.isActive }, { headers: tokenHeaders() })
-      toast.success(t(member.isActive ? 'Staff account deactivated.' : 'Staff account activated.'))
-      await loadStaff()
-    } catch (requestError) {
-      toast.error(t(requestError.response?.data?.message || 'Unable to update staff status.'))
+      toast.error(t(requestError.response?.data?.message || 'Unable to permanently delete staff member.'))
     } finally {
       setBusy(false)
     }
@@ -156,7 +146,7 @@ export default function SchoolStaffOversightView() {
                 <td className="px-5 py-4"><div className="flex justify-end gap-1">
                   <button type="button" disabled={busy} onClick={() => viewDetails(member)} title={t('View staff details')} aria-label={t('View {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-primary-50 hover:text-primary-700 disabled:opacity-50"><Eye className="h-4 w-4" /></button>
                   <button type="button" disabled={busy} onClick={() => openEdit(member)} title={t('Edit staff member')} aria-label={t('Edit {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-warning-50 hover:text-warning-700 disabled:opacity-50"><Pencil className="h-4 w-4" /></button>
-                  {member.isActive ? <button type="button" disabled={busy} onClick={() => deactivateStaff(member)} title={t('Deactivate staff member')} aria-label={t('Deactivate {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button> : <button type="button" disabled={busy} onClick={() => toggleStaffStatus(member)} className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50">{t('Reactivate')}</button>}
+                  <button type="button" disabled={busy} onClick={() => setDeleteStaff(member)} title={t('Permanently delete staff member')} aria-label={t('Delete {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
                 </div></td>
               </tr>) : <tr><td colSpan="6" className="px-5 py-12 text-center text-slate-500"><UserRound className="mx-auto mb-2 h-6 w-6 text-slate-300" />{t('No staff members match these filters.')}</td></tr>}
           </tbody>
@@ -181,6 +171,21 @@ export default function SchoolStaffOversightView() {
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={Boolean(editForm.isActive)} onChange={(event) => setEditForm({ ...editForm, isActive: event.target.checked })} />{t('Account active')}</label>
           <div className="flex justify-end gap-2 pt-2"><Button variant="secondary" type="button" disabled={busy} onClick={() => setEditStaff(null)}>{t('Cancel')}</Button><Button loading={busy} type="submit">{t('Save changes')}</Button></div>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(deleteStaff)}
+        onClose={() => !busy && setDeleteStaff(null)}
+        title={t('Permanently delete staff member')}
+        description={deleteStaff?.name || ''}
+      >
+        <p className="text-sm text-slate-700">
+          {t('Are you sure you want to permanently delete this staff member? This will remove their record entirely from the school system.')}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" type="button" disabled={busy} onClick={() => setDeleteStaff(null)}>{t('Cancel')}</Button>
+          <Button loading={busy} type="button" onClick={permanentlyDeleteStaff}>{t('Delete permanently')}</Button>
+        </div>
       </Modal>
     </div>
   )

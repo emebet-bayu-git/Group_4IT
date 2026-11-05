@@ -457,7 +457,7 @@ export async function updateSchoolStaffMember(req, res, next) {
   }
 }
 
-export async function deactivateSchoolStaffMember(req, res, next) {
+export async function deleteSchoolStaffMember(req, res, next) {
   const { id } = req.params
   if (!validId(id)) return res.status(400).json({ message: 'Provide a valid staff ID.' })
   try {
@@ -466,10 +466,66 @@ export async function deactivateSchoolStaffMember(req, res, next) {
     const connection = await pool.getConnection()
     try {
       await connection.beginTransaction()
+      const [targets] = await connection.execute(
+        `SELECT id FROM users
+         WHERE id = ? AND school_id = ?
+           AND role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
+         LIMIT 1`,
+        [id, schoolId]
+      )
+      if (!targets.length) {
+        await connection.rollback()
+        return res.status(404).json({ message: 'Staff member not found in your school.' })
+      }
+
+      const knownRelatedTables = ['teacher_workloads', 'section_advisors', 'user_school_assignments']
+      const candidateColumns = ['user_id', 'staff_id', 'member_id', 'teacher_id', 'advisor_id']
+      for (const tableName of knownRelatedTables) {
+        const [tableRows] = await connection.execute(
+          `SELECT column_name, is_nullable
+           FROM information_schema.columns
+           WHERE table_schema = DATABASE() AND table_name = ?
+           AND column_name IN ('user_id', 'staff_id', 'member_id', 'teacher_id', 'advisor_id')`,
+          [tableName]
+        )
+        for (const column of tableRows) {
+          const columnName = String(column.column_name).replace(/[^a-zA-Z0-9_]/g, '')
+          if (!candidateColumns.includes(columnName)) continue
+          if (column.is_nullable === 'YES') {
+            await connection.execute(`UPDATE \`${tableName}\` SET \`${columnName}\` = NULL WHERE \`${columnName}\` = ?`, [id])
+          } else {
+            await connection.execute(`DELETE FROM \`${tableName}\` WHERE \`${columnName}\` = ?`, [id])
+          }
+        }
+      }
+
+      const [foreignKeys] = await connection.execute(
+        `SELECT kcu.table_name, kcu.column_name, c.is_nullable
+         FROM information_schema.key_column_usage kcu
+         JOIN information_schema.columns c
+           ON c.table_schema = kcu.table_schema
+          AND c.table_name = kcu.table_name
+          AND c.column_name = kcu.column_name
+         WHERE kcu.referenced_table_schema = DATABASE()
+           AND kcu.referenced_table_name = 'users'
+           AND kcu.referenced_column_name = 'id'
+           AND kcu.table_schema = DATABASE()`
+      )
+      for (const foreignKey of foreignKeys) {
+        const tableName = String(foreignKey.table_name).replace(/[^a-zA-Z0-9_]/g, '')
+        const columnName = String(foreignKey.column_name).replace(/[^a-zA-Z0-9_]/g, '')
+        if (!tableName || !columnName) continue
+        if (foreignKey.is_nullable === 'YES') {
+          await connection.execute(`UPDATE \`${tableName}\` SET \`${columnName}\` = NULL WHERE \`${columnName}\` = ?`, [id])
+        } else {
+          await connection.execute(`DELETE FROM \`${tableName}\` WHERE \`${columnName}\` = ?`, [id])
+        }
+      }
+
       const [result] = await connection.execute(
-        `UPDATE users SET is_active = FALSE, token_version = token_version + 1,
-                failed_login_attempts = 0, locked_until = NULL
-         WHERE id = ? AND school_id = ? AND role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')`,
+        `DELETE FROM users
+         WHERE id = ? AND school_id = ?
+           AND role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')`,
         [id, schoolId]
       )
       if (!result.affectedRows) {
@@ -478,11 +534,11 @@ export async function deactivateSchoolStaffMember(req, res, next) {
       }
       await connection.execute(
         `INSERT INTO activity_logs (actor_id, actor_role, action, module, details)
-         VALUES (?, ?, 'staff.deactivated', 'users', ?)`,
+         VALUES (?, ?, 'staff.deleted', 'users', ?)`,
         [req.user.id, req.user.role, JSON.stringify({ userId: Number(id), schoolId })]
       )
       await connection.commit()
-      return res.json({ message: 'Staff member deactivated.' })
+      return res.json({ message: 'Staff member permanently deleted.' })
     } catch (error) {
       await connection.rollback()
       throw error

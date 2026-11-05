@@ -91,6 +91,19 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
   const [advisorSections, setAdvisorSections] = useState([])
   const [advisorSectionsError, setAdvisorSectionsError] = useState('')
   const role = user.systemRole || user.role
+  const refreshAcademicPeriod = async () => {
+    try {
+      const { data } = await axios.get('/api/workspace-academic-period', {
+        headers: { Authorization: `Bearer ${readSessionToken()}` },
+      })
+      setAcademicPeriod(data)
+    } catch {
+      setAcademicPeriod(null)
+    }
+  }
+  const refreshAcademicConfiguration = async () => {
+    await Promise.all([refreshDashboardStats(), refreshAcademicPeriod()])
+  }
   const refreshDashboardStats = async () => {
     setDashboardStatsLoading(true)
     setDashboardStatsError('')
@@ -124,6 +137,19 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
     }
     refreshDashboardStats()
     return undefined
+  }, [role])
+  useEffect(() => {
+    const handleAcademicContextChange = () => refreshAcademicPeriod()
+    window.addEventListener('academic-context-changed', handleAcademicContextChange)
+    let channel
+    if ('BroadcastChannel' in window) {
+      channel = new BroadcastChannel('academic-context')
+      channel.addEventListener('message', handleAcademicContextChange)
+    }
+    return () => {
+      window.removeEventListener('academic-context-changed', handleAcademicContextChange)
+      channel?.close()
+    }
   }, [role])
   useEffect(() => {
     let active = true
@@ -208,7 +234,7 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
     } else if (currentTask === 'staff-oversight') {
       content = <SchoolStaffOversightView />
     } else if (currentTask === 'academic-infrastructure') {
-      content = <AcademicInfrastructureView onConfigurationChange={refreshDashboardStats} />
+      content = <AcademicInfrastructureView onConfigurationChange={refreshAcademicConfiguration} />
     } else if (currentTask === 'staff-registration' || currentTask === 'school-profile') {
       content = currentTask === 'staff-registration'
         ? <div className="space-y-5"><WoredaTeacherRegistrationView /><AdminWorkspace activeTask={currentTask} /></div>

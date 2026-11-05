@@ -10,7 +10,7 @@ const validDate = (value) => {
 
 async function getSchoolId(userId) {
   const [[user]] = await pool.execute(
-    "SELECT school_id AS schoolId FROM users WHERE id = ? AND role = 'School Admin' LIMIT 1",
+    'SELECT school_id AS schoolId FROM users WHERE id = ? LIMIT 1',
     [userId]
   )
   if (validId(user?.schoolId)) return user.schoolId
@@ -187,7 +187,9 @@ export async function getActiveAcademicPeriod(req, res, next) {
     const schoolId = await requireSchoolId(req, res)
     if (!schoolId) return
     const [rows] = await pool.execute(
-      `SELECT year.name AS academicYear, term.name AS term
+      `SELECT year.id AS academicYearId, year.name AS academicYear,
+              year.start_date AS yearStartDate, year.end_date AS yearEndDate,
+              term.id AS semesterId, term.name AS semester
        FROM academic_years year
        LEFT JOIN academic_terms term ON term.academic_year_id = year.id
          AND term.school_id = year.school_id AND term.is_active = TRUE
@@ -195,7 +197,15 @@ export async function getActiveAcademicPeriod(req, res, next) {
        ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
       [schoolId]
     )
-    return res.json(rows.length ? { academicYear: rows[0].academicYear, term: rows[0].term || null } : null)
+    if (!rows.length) return res.json(null)
+    return res.json({
+      academicYearId: rows[0].academicYearId,
+      academicYear: rows[0].academicYear,
+      semesterId: rows[0].semesterId || null,
+      semester: rows[0].semester || null,
+      yearStartDate: rows[0].yearStartDate,
+      yearEndDate: rows[0].yearEndDate,
+    })
   } catch (error) {
     return next(error)
   }
@@ -285,26 +295,36 @@ export async function updateAcademicYear(req, res, next) {
 
 export async function deleteAcademicYear(req, res, next) {
   if (!validId(req.params.id)) return res.status(400).json({ message: 'Provide a valid academic year ID.' })
+  let connection
   try {
     const schoolId = await requireSchoolId(req, res)
     if (!schoolId) return
     const [[year]] = await pool.execute(
-      'SELECT is_active AS isActive FROM academic_years WHERE id = ? AND school_id = ? LIMIT 1',
+      'SELECT id FROM academic_years WHERE id = ? AND school_id = ? LIMIT 1',
       [req.params.id, schoolId]
     )
     if (!year) return res.status(404).json({ message: 'Academic year not found.' })
-    if (year.isActive) return res.status(409).json({ message: 'Mark this year inactive before deleting it.' })
-    const [[dependencies]] = await pool.execute(
-      `SELECT
-         (SELECT COUNT(*) FROM academic_terms WHERE academic_year_id = ? AND school_id = ?) +
-         (SELECT COUNT(*) FROM school_sections WHERE academic_year_id = ? AND school_id = ?) AS total`,
-      [req.params.id, schoolId, req.params.id, schoolId]
+    connection = await pool.getConnection()
+    await connection.beginTransaction()
+    await connection.execute(
+      'DELETE FROM school_sections WHERE academic_year_id = ? AND school_id = ?',
+      [req.params.id, schoolId]
     )
-    if (Number(dependencies.total)) return res.status(409).json({ message: 'Delete this year’s semesters and grade sections before deleting the year.' })
-    await pool.execute('DELETE FROM academic_years WHERE id = ? AND school_id = ?', [req.params.id, schoolId])
+    await connection.execute(
+      'DELETE FROM academic_terms WHERE academic_year_id = ? AND school_id = ?',
+      [req.params.id, schoolId]
+    )
+    await connection.execute(
+      'DELETE FROM academic_years WHERE id = ? AND school_id = ?',
+      [req.params.id, schoolId]
+    )
+    await connection.commit()
     return res.json({ message: 'Academic year deleted.' })
   } catch (error) {
+    if (connection) await connection.rollback()
     return next(error)
+  } finally {
+    connection?.release()
   }
 }
 
@@ -405,26 +425,32 @@ export async function updateAcademicTerm(req, res, next) {
 
 export async function deleteAcademicTerm(req, res, next) {
   if (!validId(req.params.id)) return res.status(400).json({ message: 'Provide a valid term ID.' })
+  let connection
   try {
     const schoolId = await requireSchoolId(req, res)
     if (!schoolId) return
     const [[term]] = await pool.execute(
-      'SELECT is_active AS isActive FROM academic_terms WHERE id = ? AND school_id = ? LIMIT 1',
+      'SELECT id FROM academic_terms WHERE id = ? AND school_id = ? LIMIT 1',
       [req.params.id, schoolId]
     )
     if (!term) return res.status(404).json({ message: 'Term not found.' })
-    if (term.isActive) return res.status(409).json({ message: 'Mark this term as not current before deleting it.' })
-    const [[dependencies]] = await pool.execute(
-      `SELECT
-         (SELECT COUNT(*) FROM student_grades WHERE term_id = ?) +
-         (SELECT COUNT(*) FROM school_sections WHERE academic_term_id = ? AND school_id = ?) AS total`,
-      [req.params.id, req.params.id, schoolId]
+    connection = await pool.getConnection()
+    await connection.beginTransaction()
+    await connection.execute(
+      'DELETE FROM school_sections WHERE academic_term_id = ? AND school_id = ?',
+      [req.params.id, schoolId]
     )
-    if (Number(dependencies.total)) return res.status(409).json({ message: 'This semester has saved grades or configured sections. Remove those dependencies before deleting it.' })
-    await pool.execute('DELETE FROM academic_terms WHERE id = ? AND school_id = ?', [req.params.id, schoolId])
+    await connection.execute(
+      'DELETE FROM academic_terms WHERE id = ? AND school_id = ?',
+      [req.params.id, schoolId]
+    )
+    await connection.commit()
     return res.json({ message: 'Term deleted.' })
   } catch (error) {
+    if (connection) await connection.rollback()
     return next(error)
+  } finally {
+    connection?.release()
   }
 }
 
