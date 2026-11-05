@@ -22,6 +22,7 @@ export async function authenticateUser(req, res, next) {
     }
     const [users] = await pool.execute(
       `SELECT u.id, u.full_name, u.role, u.is_active, u.token_version,
+              u.must_change_password,
               p.session_timeout_minutes
        FROM users u CROSS JOIN system_security_policy p
        WHERE u.id = ? AND p.id = 1 LIMIT 1`,
@@ -35,7 +36,19 @@ export async function authenticateUser(req, res, next) {
       || Date.now() >= (payload.iat + Number(users[0].session_timeout_minutes) * 60) * 1000) {
       return res.status(401).json({ message: 'Your session has expired. Sign in again.' })
     }
-    req.user = { id: users[0].id, role: users[0].role, name: users[0].full_name }
+    req.user = {
+      id: users[0].id,
+      role: users[0].role,
+      name: users[0].full_name,
+      mustChangePassword: Boolean(users[0].must_change_password),
+    }
+    if (req.user.mustChangePassword
+      && !(req.baseUrl === '/api/auth' && req.path === '/change-password')) {
+      return res.status(403).json({
+        message: 'You must change your temporary password before accessing the SIMS.',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      })
+    }
     return next()
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {

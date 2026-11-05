@@ -17,7 +17,7 @@ async function getTeacherContext(userId) {
             t.id AS termId, t.name AS semester
      FROM academic_years y
      JOIN academic_terms t ON t.academic_year_id = y.id AND t.school_id = y.school_id
-     WHERE y.school_id = ? AND y.is_active = TRUE AND t.is_active = TRUE
+     WHERE y.school_id = ? AND y.is_active = TRUE AND t.is_current = TRUE
      ORDER BY y.start_date DESC, t.start_date DESC LIMIT 1`,
     [teacher.schoolId]
   )

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import multer from 'multer'
-import { login } from '../controllers/authController.js'
+import { changeTemporaryPassword, login } from '../controllers/authController.js'
 import { getStaffProfile, updateStaffProfile } from '../controllers/profileController.js'
 import { authenticateUser, authorizeRoles } from '../middleware/authMiddleware.js'
 
@@ -18,6 +18,7 @@ const profilePhotoUpload = multer({
 })
 
 router.post('/login', login)
+router.post('/change-password', authenticateUser, changeTemporaryPassword)
 router.get('/profile', authenticateUser, authorizeRoles(...staffRoles), getStaffProfile)
 router.put('/profile', authenticateUser, authorizeRoles(...staffRoles), profilePhotoUpload.single('profilePhoto'), updateStaffProfile)
 

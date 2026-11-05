@@ -7,8 +7,12 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(100) UNIQUE NOT NULL,
   username VARCHAR(60) NULL,
   phone VARCHAR(40) NULL,
+  employee_id VARCHAR(50) NULL,
+  gender ENUM('Female', 'Male') NULL,
+  school_id INT NULL,
   avatar_path VARCHAR(500) NULL,
   password VARCHAR(255) NOT NULL,
+  must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
   role ENUM(
     'Super Admin',
     'School Admin',
@@ -21,7 +25,8 @@ CREATE TABLE IF NOT EXISTS users (
   ) NOT NULL,
   grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12', 'N/A') DEFAULT 'N/A',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_users_username (username)
+  UNIQUE KEY uq_users_username (username),
+  UNIQUE KEY uq_users_school_employee_id (school_id, employee_id)
 );
 
 CREATE TABLE IF NOT EXISTS student_records (
@@ -76,7 +81,7 @@ INSERT IGNORE INTO role_tasks (role, task_title, task_description, action_route)
 ('Student', 'View Grade Report', 'Check Grade 9-12 subject scores, GPA, and term ranks.', '/student/grades'),
 ('Student', 'Class Schedule', 'View daily timetable and national exam preparation schedules.', '/student/schedule');
 
-INSERT IGNORE INTO users (full_name, email, password, role, grade_level) VALUES
-('Super Admin User', 'superadmin@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Super Admin', 'N/A'),
-('Abebe Kebede (Student)', 'student@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Student', 'Grade 11'),
-('Tewodros Kassahun (Teacher)', 'teacher@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Teacher', 'N/A');
+INSERT IGNORE INTO users (full_name, email, password, role, grade_level, must_change_password) VALUES
+('Super Admin User', 'superadmin@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Super Admin', 'N/A', FALSE),
+('Abebe Kebede (Student)', 'student@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Student', 'Grade 11', TRUE),
+('Tewodros Kassahun (Teacher)', 'teacher@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Teacher', 'N/A', TRUE);

@@ -6,7 +6,6 @@ import AdminWorkspace from '../components/AdminWorkspace.jsx'
 import AcademicInfrastructureView from '../components/AcademicInfrastructureView.jsx'
 import RoleAssignView from '../components/RoleAssignView.jsx'
 import DashboardLayout, { dashboardMenuByRole } from '../components/DashboardLayout.jsx'
-import RegisterStudent from '../components/RegisterStudent.jsx'
 import ReportCardView from '../components/ReportCardView.jsx'
 import StudentDashboard from '../components/StudentDashboard.jsx'
 import StudentList from '../components/StudentList.jsx'
@@ -20,7 +19,7 @@ import LeadershipResultsView from '../components/LeadershipResultsView.jsx'
 import SectionAllocationView from '../components/SectionAllocationView.jsx'
 import ReEnrollmentView from '../components/ReEnrollmentView.jsx'
 import TeacherWorkloadView from '../components/TeacherWorkloadView.jsx'
-import WoredaTeacherRegistrationView from '../components/WoredaTeacherRegistrationView.jsx'
+import RegisterStaffView from '../components/RegisterStaffView.jsx'
 import { readSessionToken } from './LoginPage.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
 
@@ -34,7 +33,7 @@ const taskDetails = {
   'School Admin': {
     'academic-infrastructure': ['Academic Infrastructure', 'Manage semesters, grade levels, and sections for this school.'],
     'school-profile': ['School Profile & Metadata', 'Manage school stamp, header, and profile information.'],
-    'staff-registration': ['Register School Staff', 'Onboard Woreda-deployed teachers and create staff accounts for your assigned school.'],
+    'staff-registration': ['Register School Staff', ''],
     'staff-oversight': ['School Staff Oversight', 'Review staff and operational assignments for this school.'],
     'role-assign': ['Role Assign', 'Assign school leadership roles to teachers and registrars.'],
     'student-rosters': ['Student Rosters', 'Review roster and enrollment status for this school only.'],
@@ -237,7 +236,7 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
       content = <AcademicInfrastructureView onConfigurationChange={refreshAcademicConfiguration} />
     } else if (currentTask === 'staff-registration' || currentTask === 'school-profile') {
       content = currentTask === 'staff-registration'
-        ? <div className="space-y-5"><WoredaTeacherRegistrationView /><AdminWorkspace activeTask={currentTask} /></div>
+        ? <RegisterStaffView />
         : <AdminWorkspace activeTask={currentTask} />
     }
   } else if (role === 'Admin') {
@@ -250,9 +249,7 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
     }
   } else if (role === 'Registrar') {
     if (currentTask === 'overview') {
-      content = <StudentList onRegister={() => navigateTask('enrollment')} onAction={(action, student) => window.alert(`${action}: ${student.name}`)} />
-    } else if (currentTask === 'enrollment') {
-      content = <RegisterStudent onCancel={() => navigateTask('overview')} onComplete={saveStudent} allowUnassigned />
+      content = <StudentList onRegisterStudent={saveStudent} onAction={(action, student) => window.alert(`${action}: ${student.name}`)} />
     } else if (currentTask === 're-enrollment') {
       content = <ReEnrollmentView />
     } else if (currentTask === 'section-allocation') {
@@ -298,8 +295,6 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
   return (
     <DashboardLayout
       user={user}
-      academicYear={academicPeriod?.academicYear || dashboardStats?.academicPeriod?.academicYear || 'Not configured'}
-      semester={academicPeriod?.semester || dashboardStats?.academicPeriod?.semester || 'No current semester'}
       activeTask={currentTask}
       onNavigate={navigateTask}
       onLogout={onLogout}

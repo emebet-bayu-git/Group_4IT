@@ -18,7 +18,7 @@ const getTodayDate = () => {
   return date.toISOString().slice(0, 10)
 }
 const initialData = {
-  fullName: '', dob: '', gender: '', photoFile: null, parentPhoto: null, email: '', password: '',
+  fullName: '', dob: '', gender: '', photoFile: null, parentPhoto: null, email: '',
   phoneNumber: '', previousSchool: '', guardianName: '', guardianRelation: '', guardianPhone: '',
   guardianEmail: '', emergencyContactName: '', emergencyContactPhone: '',
   region: '', zone: '', woreda: '', kebele: '', houseNo: '',
@@ -31,16 +31,16 @@ const fallbackAcademicOptions = {
   )),
 }
 
-function Field({ name, label, type = 'text', requiredField = true, placeholder, options, onChange, data, setField, touch, inputClass, hasError, touched, isValid }) {
+function Field({ name, label, type = 'text', requiredField = true, placeholder, options, emptyOption, onChange, data, setField, touch, inputClass, hasError, touched, isValid }) {
   const { t } = useTranslation()
   return (
     <label className="block text-sm font-semibold text-slate-700">
       {t(label)}{requiredField && <span className="ml-1 text-danger-600">*</span>}
       <div className="relative">
-        {options ? <select value={data[name]} onChange={(event) => onChange ? onChange(event.target.value) : setField(name, event.target.value)} onBlur={() => touch(name)} className={inputClass(name)}><option value="">{t('Select {field}', { field: label.toLowerCase() })}</option>{options.map((option) => <option key={option} value={option}>{t(option)}</option>)}</select> : <input type={type} value={data[name]} onChange={(event) => setField(name, event.target.value)} onBlur={() => touch(name)} placeholder={placeholder ? t(placeholder) : undefined} className={inputClass(name)} />}
+        {options ? <select value={data[name]} onChange={(event) => onChange ? onChange(event.target.value) : setField(name, event.target.value)} onBlur={() => touch(name)} className={inputClass(name)}><option value="">{t(emptyOption || 'Select {field}', emptyOption ? undefined : { field: label.toLowerCase() })}</option>{options.map((option) => <option key={option} value={option}>{t(option)}</option>)}</select> : <input type={type} value={data[name]} onChange={(event) => setField(name, event.target.value)} onBlur={() => touch(name)} placeholder={placeholder ? t(placeholder) : undefined} className={inputClass(name)} />}
         {touched[name] && isValid(name) && data[name] && <Check className="absolute right-3 top-[19px] h-4 w-4 text-success-600" />}
       </div>
-      {hasError(name) && <span className="mt-1 block text-xs font-medium text-danger-600">{t(name === 'password' ? 'Password must be 8–72 characters.' : 'Enter a valid value.')}</span>}
+      {hasError(name) && <span className="mt-1 block text-xs font-medium text-danger-600">{t('Enter a valid value.')}</span>}
     </label>
   )
 }
@@ -55,7 +55,6 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
     registrationDate: String(student.registrationDate || '').slice(0, 10),
     photoFile: null,
     parentPhoto: null,
-    password: '',
   } : initialData)
   const [touched, setTouched] = useState({})
   const [photoPreview, setPhotoPreview] = useState(student?.photoUrl || '')
@@ -63,6 +62,7 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
   const [saving, setSaving] = useState(false)
   const [studentId, setStudentId] = useState('')
   const [academicOptions, setAcademicOptions] = useState(fallbackAcademicOptions)
+  const [activeAcademicPeriod, setActiveAcademicPeriod] = useState(null)
   const setField = (field, value) => setData((current) => ({ ...current, [field]: value }))
   const touch = (field) => setTouched((current) => ({ ...current, [field]: true }))
   useEffect(() => {
@@ -77,20 +77,28 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
         headers: { Authorization: `Bearer ${token}` },
       }).then(({ data: activePeriod }) => {
         if (!active) return
+        const years = [...data.years]
+        for (const year of [activePeriod?.academicYear, student?.academicYear]) {
+          if (year && !years.includes(year)) years.unshift(year)
+        }
+        setActiveAcademicPeriod(activePeriod)
+        setAcademicOptions({ ...data, years })
         setData((current) => ({
           ...current,
-          academicYear: student?.academicYear || activePeriod?.academicYear || data.years[0] || '',
+          academicYear: student?.academicYear || activePeriod?.academicYear || years[0] || '',
           section: data.sections.some((section) => section.gradeLevel === current.grade && section.sectionName === current.section)
             ? current.section
             : '',
         }))
-      }).catch(() => {
+      }).catch((error) => {
         if (!active) return
+        setActiveAcademicPeriod(null)
         setData((current) => ({
           ...current,
           academicYear: student?.academicYear || data.years[0] || '',
           section: '',
         }))
+        toast.error(t(error.response?.data?.message || 'Unable to load the active academic year and semester.'))
       })
     }).catch((error) => {
       if (active) toast.error(t(error.response?.data?.message || 'Unable to load current academic assignments.'))
@@ -106,10 +114,15 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
           axios.get('/api/academic/active-year', { headers: { Authorization: `Bearer ${token}` } }),
           axios.get('/api/academic-options', { headers: { Authorization: `Bearer ${token}` } }),
         ])
-        setAcademicOptions(options)
+        setActiveAcademicPeriod(activePeriod)
+        const years = [...options.years]
+        if (activePeriod?.academicYear && !years.includes(activePeriod.academicYear)) {
+          years.unshift(activePeriod.academicYear)
+        }
+        setAcademicOptions({ ...options, years })
         setData((current) => ({
           ...current,
-          academicYear: activePeriod?.academicYear || options.years?.[0] || '',
+          academicYear: activePeriod?.academicYear || years[0] || '',
         }))
       } catch (error) {
         toast.error(t(error.response?.data?.message || 'Unable to refresh the active academic year.'))
@@ -140,7 +153,6 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
   }, [data.parentPhoto])
   const isValid = (field) => {
     const value = data[field]?.trim?.() ?? data[field]
-    if (field === 'password') return typeof value === 'string' && value.length >= 8 && value.length <= 72
     if (field === 'houseNo') return !value || value.length <= 40
     if (field === 'email') return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
     if (field === 'guardianEmail') return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
@@ -148,16 +160,14 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
     return value !== undefined && value !== '' && value !== null
   }
   const required = {
-    0: ['fullName', 'dob', 'gender', 'phoneNumber', 'previousSchool', ...(!student ? ['password'] : [])],
+    0: ['fullName', 'dob', 'gender', 'phoneNumber', 'previousSchool'],
     1: ['region', 'zone', 'woreda', 'kebele', 'guardianName', 'guardianRelation', 'guardianPhone', 'emergencyContactName', 'emergencyContactPhone'],
     2: ['grade', ...(!allowUnassigned || student ? ['section'] : []), 'academicYear', 'registrationDate'],
   }
   const hasError = (field) => touched[field] && !isValid(field)
   const stepValid = () => required[step].every((field) => isValid(field))
-    && (!student || step !== 0 || !data.password || isValid('password'))
   const next = () => {
     required[step].forEach(touch)
-    if (student && step === 0 && data.password) touch('password')
     if (stepValid()) setStep((current) => Math.min(2, current + 1))
   }
   const inputClass = (field) => `mt-1.5 h-10 w-full rounded-md border bg-white px-3 text-sm outline-none transition ${hasError(field) ? 'border-danger-500 ring-2 ring-danger-100' : touched[field] && isValid(field) ? 'border-success-500 ring-2 ring-success-100' : 'border-slate-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-100'}`
@@ -173,7 +183,6 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
       const createdStudent = await onComplete?.(data)
       setStudentId(createdStudent.studentId)
       toast.success(t(student ? 'Student details updated successfully.' : 'Student registration saved successfully.'))
-      setData((current) => ({ ...current, password: '' }))
     } catch (error) {
       const message = error.response?.data?.message || error.message || t('Unable to save student registration.')
       toast.error(t(message))
@@ -183,7 +192,7 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
   }
   return (
     <div className="mx-auto max-w-5xl">
-      {studentId ? <section className="rounded-lg border border-success-200 bg-white p-8 text-center shadow-panel"><span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-success-50 text-success-700"><Check className="h-6 w-6" /></span><h1 className="mt-4 text-2xl font-bold text-slate-900">{t(student ? 'Student updated' : 'Student registered')}</h1><p className="mt-2 text-sm text-slate-600">{data.fullName} {t(student ? 'has been updated.' : 'is saved and can sign in with this Student ID:')}</p>{!student && <p className="mt-3 text-2xl font-bold text-primary-800">{studentId}</p>}{!student && <p className="mt-2 text-xs text-slate-500">{t('The temporary password is the one entered during registration.')}</p>}<Button className="mt-6" onClick={onCancel}>{t('Back to student directory')}</Button></section> : <>
+      {studentId ? <section className="rounded-lg border border-success-200 bg-white p-8 text-center shadow-panel"><span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-success-50 text-success-700"><Check className="h-6 w-6" /></span><h1 className="mt-4 text-2xl font-bold text-slate-900">{t(student ? 'Student updated' : 'Student registered')}</h1><p className="mt-2 text-sm text-slate-600">{data.fullName} {t(student ? 'has been updated.' : 'is saved and can sign in with this Student ID:')}</p>{!student && <p className="mt-3 text-2xl font-bold text-primary-800">{studentId}</p>}{!student && <p className="mt-2 text-xs text-slate-500">{t('Temporary password: 12345678. It must be changed at first sign-in.')}</p>}<Button className="mt-6" onClick={onCancel}>{t('Back to student directory')}</Button></section> : <>
       <div className="mb-6"><p className="text-sm font-semibold text-primary-700">{t(student ? 'Student records' : 'Enrollment')}</p><h1 className="mt-1 text-2xl font-bold text-slate-900">{student ? t('Edit {name}', { name: student.fullName }) : t('Register new student')}</h1></div>
       <nav className="mb-6 rounded-lg border border-slate-200 bg-white px-4 py-5 shadow-panel" aria-label={t('Registration progress')}>
         <ol className="grid grid-cols-3 gap-2">{steps.map((item, index) => { const Icon = item.icon; return <li key={item.title} className="relative flex items-center gap-2 sm:gap-3"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold ${index < step ? 'bg-success-600 text-white' : index === step ? 'bg-primary-800 text-white' : 'bg-slate-100 text-slate-500'}`}>{index < step ? <Check className="h-4 w-4" /> : index + 1}</span><div className="hidden min-w-0 sm:block"><p className={`truncate text-xs font-semibold ${index <= step ? 'text-slate-900' : 'text-slate-400'}`}>{t(item.short)}</p><p className="mt-0.5 text-xs text-slate-400">{t('Step {step}', { step: index + 1 })}</p></div>{index < 2 && <span className={`absolute left-[calc(50%+20px)] right-0 top-4 hidden h-px sm:block ${index < step ? 'bg-success-500' : 'bg-slate-200'}`} />}</li> })}</ol>
@@ -202,9 +211,9 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
             <Field {...fieldProps} name="phoneNumber" label="Phone number" type="tel" placeholder="Student phone number" />
             <Field {...fieldProps} name="previousSchool" label="Previous school" placeholder="Previous school" />
             <Field {...fieldProps} name="email" label="Email (optional)" type="email" requiredField={false} placeholder="student@example.com" />
-            <Field {...fieldProps} name="password" label={student ? 'New password (optional)' : 'Temporary password'} requiredField={!student} type="password" placeholder={student ? 'Leave blank to keep current password' : 'At least 8 characters'} />
           </div>
         </div>}
+        {!student && <p className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-600">{t('New student accounts receive temporary password 12345678 and must change it at first sign-in.')}</p>}
         {step === 1 && <div className="grid gap-6 md:grid-cols-[180px_minmax(0,1fr)]">
           <div>
             <p className="mb-2 text-sm font-semibold text-slate-700">{t('Parent photo')}</p>
@@ -234,7 +243,10 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
               {t('Section assignment is locked until the Registrar completes student check-in.')}
             </div>
             : <Field {...fieldProps} name="section" label="Section" options={academicOptions.sections.filter((item) => item.gradeLevel === data.grade).map((item) => item.sectionName)} />}
-          <Field {...fieldProps} name="academicYear" label="Academic year" options={academicOptions.years} />
+          <Field {...fieldProps} name="academicYear" label="Academic year" options={academicOptions.years} emptyOption={academicOptions.years.length ? undefined : 'No academic years configured'} />
+          {activeAcademicPeriod?.semester && <p className="text-sm text-slate-600 sm:col-span-2">
+            {t('Current academic period')}: {activeAcademicPeriod.academicYear} · {activeAcademicPeriod.semester}
+          </p>}
           <Field {...fieldProps} name="registrationDate" label="Registration date" type="date" />
           <div className="rounded-md border border-primary-100 bg-primary-50 p-4 sm:col-span-2"><p className="text-sm font-semibold text-primary-900">{t('Registration summary')}</p><p className="mt-1 text-sm text-primary-700">{data.fullName || t('Student')} will be assigned to {data.grade || t('a grade')} · {data.section || (allowUnassigned ? t('Unassigned — assign a section later') : t('a section'))} for {data.academicYear}.</p></div>
         </div>}

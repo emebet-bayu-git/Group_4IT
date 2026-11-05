@@ -27,11 +27,16 @@ export async function ensureAuthenticationSchema() {
   await ensureColumn('failed_login_attempts', 'INT UNSIGNED NOT NULL DEFAULT 0')
   await ensureColumn('locked_until', 'DATETIME NULL')
   await ensureColumn('password_changed_at', 'DATETIME NULL')
+  await ensureColumn('must_change_password', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await pool.query('ALTER TABLE users MODIFY must_change_password BOOLEAN NOT NULL DEFAULT TRUE')
   await ensureColumn('token_version', 'INT UNSIGNED NOT NULL DEFAULT 0')
   await ensureColumn('registration_source', "ENUM('admin', 'registrar', 'pending') NOT NULL DEFAULT 'pending'")
   await ensureColumn('registered_by', 'INT NULL')
   await ensureColumn('username', 'VARCHAR(60) NULL')
   await ensureColumn('phone', 'VARCHAR(40) NULL')
+  await ensureColumn('employee_id', 'VARCHAR(50) NULL')
+  await ensureColumn('gender', "ENUM('Female', 'Male') NULL")
+  await ensureColumn('school_id', 'INT NULL')
   await ensureColumn('department', 'VARCHAR(100) NULL')
   await ensureColumn('avatar_path', 'VARCHAR(500) NULL')
   const [usernameIndex] = await pool.execute(
@@ -72,4 +77,9 @@ export async function ensureAuthenticationSchema() {
        VALUES ('admin_workspace_legacy_registration_source')`
     )
   }
+  await pool.query(
+    `UPDATE users SET registration_source = 'admin'
+     WHERE role = 'Super Admin' AND registration_source = 'pending'`
+  )
+  await pool.execute("UPDATE users SET must_change_password = FALSE WHERE role = 'Super Admin'")
 }

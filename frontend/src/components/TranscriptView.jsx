@@ -6,10 +6,12 @@ import Button from './ui/Button.jsx'
 import { readSessionToken } from '../pages/LoginPage.jsx'
 import { SchoolMark, useSchoolProfile } from './SchoolIdentity.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
+import { useAcademicContext } from '../contexts/AcademicContext.jsx'
 
 export default function TranscriptView({ onBack, registrarMode = false }) {
   const { t } = useTranslation()
   const school = useSchoolProfile()
+  const { period } = useAcademicContext()
   const [studentId, setStudentId] = useState('')
   const [requestedId, setRequestedId] = useState('')
   const [records, setRecords] = useState([])
@@ -66,6 +68,7 @@ export default function TranscriptView({ onBack, registrarMode = false }) {
         </label>
         <Button type="submit">{t('Load transcript')}</Button>
       </form>}
+      {registrarMode && period?.academicYear && <p className="mb-4 text-sm font-semibold text-primary-800">{t('Current academic period')}: {period.academicYear}{period.semester ? ` · ${t(period.semester)}` : ''}</p>}
       {loading ? <p role="status" className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-600">{t('Loading archived academic records…')}</p>
         : !records.length ? <p className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-600">{t(registrarMode && !requestedId ? 'Enter a student record ID to retrieve its archived transcript.' : 'No permanently archived academic records are available.')}</p>
           : <div className="transcript-document">

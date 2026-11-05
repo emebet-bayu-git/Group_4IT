@@ -10,10 +10,11 @@ const validDate = (value) => {
 
 async function getSchoolId(userId) {
   const [[user]] = await pool.execute(
-    'SELECT school_id AS schoolId FROM users WHERE id = ? LIMIT 1',
+    'SELECT school_id AS schoolId, role FROM users WHERE id = ? AND is_active = TRUE LIMIT 1',
     [userId]
   )
   if (validId(user?.schoolId)) return user.schoolId
+  if (user?.role !== 'School Admin') return null
   const [assignments] = await pool.execute(
     'SELECT school_id AS schoolId FROM school_admin_assignments WHERE user_id = ? ORDER BY assigned_at DESC LIMIT 1',
     [userId]
@@ -24,7 +25,7 @@ async function getSchoolId(userId) {
 async function requireSchoolId(req, res) {
   const schoolId = await getSchoolId(req.user.id)
   if (!validId(schoolId)) {
-    res.status(403).json({ message: 'Your School Admin account is not assigned to a school.' })
+    res.status(403).json({ message: 'Your account is not assigned to a school.' })
     return null
   }
   return schoolId
@@ -62,7 +63,7 @@ export const listAcademicYears = (req, res, next) => listRows(
 
 export const listAcademicTerms = (req, res, next) => listRows(
   req, res, next, 'academic_terms',
-  'id, academic_year_id AS academicYearId, name, start_date AS startDate, end_date AS endDate, is_active AS isActive',
+  'id, academic_year_id AS academicYearId, name, start_date AS startDate, end_date AS endDate, is_active AS isActive, is_current AS isCurrent',
   'start_date'
 )
 
@@ -187,22 +188,26 @@ export async function getActiveAcademicPeriod(req, res, next) {
     const schoolId = await requireSchoolId(req, res)
     if (!schoolId) return
     const [rows] = await pool.execute(
-      `SELECT year.id AS academicYearId, year.name AS academicYear,
+      `SELECT school.id AS schoolId, school.name AS schoolName,
+              year.id AS academicYearId, year.name AS academicYear,
               year.start_date AS yearStartDate, year.end_date AS yearEndDate,
               term.id AS semesterId, term.name AS semester
-       FROM academic_years year
+       FROM schools school
+       LEFT JOIN academic_years year ON year.school_id = school.id AND year.is_active = TRUE
        LEFT JOIN academic_terms term ON term.academic_year_id = year.id
-         AND term.school_id = year.school_id AND term.is_active = TRUE
-       WHERE year.school_id = ? AND year.is_active = TRUE
+         AND term.school_id = year.school_id AND term.is_current = TRUE
+       WHERE school.id = ?
        ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
       [schoolId]
     )
-    if (!rows.length) return res.json(null)
+    if (!rows.length) return res.status(404).json({ message: 'Your assigned school could not be found.' })
     return res.json({
-      academicYearId: rows[0].academicYearId,
-      academicYear: rows[0].academicYear,
+      schoolId: rows[0].schoolId,
+      schoolName: rows[0].schoolName,
+      academicYearId: rows[0].academicYearId || null,
+      academicYear: rows[0].academicYear || null,
       semesterId: rows[0].semesterId || null,
-      semester: rows[0].semester || null,
+      semester: formatSemesterName(rows[0].semester),
       yearStartDate: rows[0].yearStartDate,
       yearEndDate: rows[0].yearEndDate,
     })
@@ -234,6 +239,12 @@ export async function createAcademicYear(req, res, next) {
       'INSERT INTO academic_years (name, start_date, end_date, is_active, school_id) VALUES (?, ?, ?, ?, ?)',
       [body.name.trim(), body.startDate, body.endDate, body.isActive === true, schoolId]
     )
+    if (body.isActive === true) {
+      await connection.execute(
+        'UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ? AND academic_year_id <> ?',
+        [schoolId, result.insertId]
+      )
+    }
     await connection.commit()
     const [[year]] = await pool.execute(
       'SELECT id, name, start_date AS startDate, end_date AS endDate, is_active AS isActive FROM academic_years WHERE id = ? AND school_id = ?',
@@ -278,6 +289,17 @@ export async function updateAcademicYear(req, res, next) {
       'UPDATE academic_years SET is_active = ? WHERE id = ? AND school_id = ?',
       [body.isActive === true, req.params.id, schoolId]
     )
+    if (body.isActive === true) {
+      await connection.execute(
+        'UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ? AND academic_year_id <> ?',
+        [schoolId, req.params.id]
+      )
+    } else {
+      await connection.execute(
+        'UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ? AND academic_year_id = ?',
+        [schoolId, req.params.id]
+      )
+    }
     await connection.commit()
     const [[year]] = await pool.execute(
       'SELECT id, name, start_date AS startDate, end_date AS endDate, is_active AS isActive FROM academic_years WHERE id = ? AND school_id = ?',
@@ -329,7 +351,7 @@ export async function deleteAcademicYear(req, res, next) {
 }
 
 async function validateTerm(schoolId, body) {
-  if (!validId(body?.academicYearId) || typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 40
+  if (!validId(body?.academicYearId) || !['Semester 1', 'Semester 2'].includes(body.name)
     || !validDateRange(body.startDate, body.endDate)
     || (body.isActive !== undefined && typeof body.isActive !== 'boolean')) return false
   const [years] = await pool.execute(
@@ -340,8 +362,8 @@ async function validateTerm(schoolId, body) {
 }
 
 async function setCurrentTerm(connection, schoolId, termId) {
-  await connection.execute('UPDATE academic_terms SET is_active = FALSE WHERE school_id = ?', [schoolId])
-  await connection.execute('UPDATE academic_terms SET is_active = TRUE WHERE id = ? AND school_id = ?', [termId, schoolId])
+  await connection.execute('UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ?', [schoolId])
+  await connection.execute('UPDATE academic_terms SET is_active = TRUE, is_current = TRUE WHERE id = ? AND school_id = ?', [termId, schoolId])
 }
 
 export async function createAcademicTerm(req, res, next) {
@@ -353,10 +375,12 @@ export async function createAcademicTerm(req, res, next) {
     if (!await validateTerm(schoolId, body)) return res.status(400).json({ message: 'Choose an existing school year, enter a term name, and provide valid dates. To mark a term current, first mark its school year active.' })
     connection = await pool.getConnection()
     await connection.beginTransaction()
-    if (body.isActive === true) await connection.execute('UPDATE academic_terms SET is_active = FALSE WHERE school_id = ?', [schoolId])
+    if (body.isActive === true) {
+      await connection.execute('UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ?', [schoolId])
+    }
     const [result] = await connection.execute(
-      'INSERT INTO academic_terms (academic_year_id, name, start_date, end_date, is_active, school_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [body.academicYearId, body.name.trim(), body.startDate, body.endDate, body.isActive === true, schoolId]
+      'INSERT INTO academic_terms (academic_year_id, name, start_date, end_date, is_active, is_current, school_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [body.academicYearId, body.name.trim(), body.startDate, body.endDate, body.isActive === true, body.isActive === true, schoolId]
     )
     await connection.commit()
     const [[term]] = await pool.execute(
@@ -407,7 +431,7 @@ export async function updateAcademicTerm(req, res, next) {
       [body.academicYearId, body.name.trim(), body.startDate, body.endDate, req.params.id, schoolId]
     )
     if (body.isActive === true) await setCurrentTerm(connection, schoolId, req.params.id)
-    else await connection.execute('UPDATE academic_terms SET is_active = FALSE WHERE id = ? AND school_id = ?', [req.params.id, schoolId])
+    else await connection.execute('UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE id = ? AND school_id = ?', [req.params.id, schoolId])
     await connection.commit()
     const [[term]] = await pool.execute(
       'SELECT id, academic_year_id AS academicYearId, name, start_date AS startDate, end_date AS endDate, is_active AS isActive FROM academic_terms WHERE id = ? AND school_id = ?',
@@ -468,7 +492,7 @@ async function getActiveSectionPeriod(schoolId) {
      JOIN academic_terms semester ON semester.academic_year_id = year.id
        AND semester.school_id = year.school_id
      WHERE year.school_id = ?
-       AND year.is_active = TRUE AND semester.is_active = TRUE LIMIT 1`,
+       AND year.is_active = TRUE AND semester.is_current = TRUE LIMIT 1`,
     [schoolId]
   )
   return periods[0] || null

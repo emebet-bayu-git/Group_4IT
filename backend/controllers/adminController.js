@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pool } from '../config/db.js'
+import { DEFAULT_TEMPORARY_PASSWORD } from '../utils/accountDefaults.js'
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const studentPhotoDirectory = path.resolve(directory, '../../uploads/students')
@@ -235,17 +236,6 @@ function passwordMeetsPolicy(password, policy) {
     && password.length <= 72
     && (!policy.require_password_mixed_case || (/[a-z]/.test(password) && /[A-Z]/.test(password)))
     && (!policy.require_password_number || /\d/.test(password))
-}
-
-function generateInitialPassword(policy) {
-  if (Number(policy.min_password_length) > 68) {
-    throw new Error('Configured password policy exceeds the supported initial credential length.')
-  }
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const password = `Aa2-${crypto.randomBytes(48).toString('base64url')}`
-    if (passwordMeetsPolicy(password, policy)) return password
-  }
-  throw new Error('Unable to generate an initial credential that meets the configured password policy.')
 }
 
 function isProtectedDefaultAdminUser(user) {
@@ -553,16 +543,18 @@ export async function createWoredaTeacher(req, res, next) {
   const employeeId = typeof body.woredaEmployeeId === 'string' ? body.woredaEmployeeId.trim() : ''
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const phone = typeof body.phoneNumber === 'string' ? body.phoneNumber.trim() : ''
+  const gender = body.gender
   const specialization = typeof body.specialization === 'string' ? body.specialization.trim() : ''
   const qualification = typeof body.qualificationDegree === 'string' ? body.qualificationDegree.trim() : ''
   const credential = typeof body.usernameOrEmail === 'string' ? body.usernameOrEmail.trim() : ''
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(credential)
   const isUsername = /^[a-zA-Z0-9._-]{3,60}$/.test(credential)
   if (!employeeId || employeeId.length > 50 || !name || name.length > 100
-    || phone.length < 5 || phone.length > 40 || !specialization || specialization.length > 100
+    || phone.length < 5 || phone.length > 40 || !['Male', 'Female'].includes(gender)
+    || !specialization || specialization.length > 100
     || !qualification || qualification.length > 100 || (!isEmail && !isUsername)) {
     return res.status(400).json({
-      message: 'Enter the Woreda employee ID, full name, valid phone number, specialization, qualification, and a valid email address or username.',
+      message: 'Enter the Woreda employee ID, full name, valid phone number, gender, specialization, qualification, and a valid email address or username.',
     })
   }
   try {
@@ -575,9 +567,7 @@ export async function createWoredaTeacher(req, res, next) {
       [schoolId]
     )
     if (!school) return res.status(403).json({ message: 'Your assigned school is not active.' })
-    const policy = await getPolicy()
-    const initialPassword = generateInitialPassword(policy)
-    const passwordHash = await bcrypt.hash(initialPassword, 10)
+    const passwordHash = await bcrypt.hash(DEFAULT_TEMPORARY_PASSWORD, 10)
     const email = isEmail ? credential.toLowerCase() : `teacher-${crypto.randomUUID()}@accounts.school.local`
     const username = isEmail ? null : credential.toLowerCase()
     const connection = await pool.getConnection()
@@ -585,10 +575,10 @@ export async function createWoredaTeacher(req, res, next) {
       await connection.beginTransaction()
       const [userResult] = await connection.execute(
         `INSERT INTO users
-           (full_name, email, username, phone, password, role, grade_level, is_active,
-            registration_source, registered_by, school_id, department, subjects)
-         VALUES (?, ?, ?, ?, ?, 'Teacher', 'N/A', TRUE, 'admin', ?, ?, ?, ?)`,
-        [name, email, username, phone, passwordHash, req.user.id, schoolId, specialization, specialization]
+           (full_name, email, username, phone, gender, password, role, grade_level, is_active,
+            registration_source, registered_by, school_id, department, subjects, must_change_password)
+         VALUES (?, ?, ?, ?, ?, ?, 'Teacher', 'N/A', TRUE, 'admin', ?, ?, ?, ?, TRUE)`,
+        [name, email, username, phone, gender, passwordHash, req.user.id, schoolId, specialization, specialization]
       )
       await connection.execute(
         `INSERT INTO teachers
@@ -608,9 +598,10 @@ export async function createWoredaTeacher(req, res, next) {
         id: Number(userResult.insertId),
         name,
         woredaEmployeeId: employeeId,
+        gender,
         usernameOrEmail: isEmail ? email : username,
-        initialPassword,
-        message: 'Teacher onboarded. Save the initial password now; it will not be shown again.',
+        mustChangePassword: true,
+        message: 'Teacher onboarded. The temporary password must be changed on first sign-in.',
       })
     } catch (error) {
       await connection.rollback()
@@ -627,11 +618,25 @@ export async function createWoredaTeacher(req, res, next) {
 }
 
 export async function createUser(req, res, next) {
-  const { name, email, password, role } = req.body ?? {}
+  const { name, email, role } = req.body ?? {}
+  const isRegistrar = role === 'Registrar'
+  const employeeId = typeof req.body?.employeeId === 'string' ? req.body.employeeId.trim() : ''
+  const phoneNumber = typeof req.body?.phoneNumber === 'string' ? req.body.phoneNumber.trim() : ''
+  const gender = req.body?.gender
+  const usernameOrEmail = typeof req.body?.usernameOrEmail === 'string'
+    ? req.body.usernameOrEmail.trim()
+    : ''
   let schoolId = req.body?.schoolId ?? req.body?.school_id
   if (schoolId === '') schoolId = undefined
-  const cleanName = typeof name === 'string' ? name.trim() : ''
-  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
+  const submittedName = isRegistrar ? req.body?.fullName ?? name : name
+  const cleanName = typeof submittedName === 'string' ? submittedName.trim() : ''
+  const credential = isRegistrar ? usernameOrEmail : typeof email === 'string' ? email.trim() : ''
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(credential)
+  const isUsername = /^[a-zA-Z0-9._-]{3,60}$/.test(credential)
+  const cleanEmail = isRegistrar
+    ? isEmail ? credential.toLowerCase() : ''
+    : typeof email === 'string' ? email.trim().toLowerCase() : ''
+  const cleanUsername = isRegistrar && isUsername && !isEmail ? credential.toLowerCase() : null
   if (role === 'Student') {
     return res.status(403).json({ message: 'Student accounts must be created through the Registrar student registration workflow.' })
   }
@@ -650,7 +655,17 @@ export async function createUser(req, res, next) {
   if (!cleanName || cleanName.length > 100) {
     return res.status(400).json({ message: 'A name is required and must be at most 100 characters.' })
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanEmail.length > 100) {
+  if (isRegistrar) {
+    if (!employeeId || employeeId.length > 50
+      || phoneNumber.length > 40 || phoneNumber.replace(/\D/g, '').length < 7
+      || !['Male', 'Female'].includes(gender)
+      || (!isEmail && !isUsername)
+      || (isEmail && credential.length > 100)) {
+      return res.status(400).json({
+        message: 'Enter a valid full name, employee ID, phone number, gender, and email address or username.',
+      })
+    }
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanEmail.length > 100) {
     return res.status(400).json({ message: 'Provide a valid email address of at most 100 characters.' })
   }
   if (!allowedRoles.includes(role)) {
@@ -673,30 +688,38 @@ export async function createUser(req, res, next) {
     if (!validId(schoolId)) {
       return res.status(400).json({ message: 'An assigned school ID is required.' })
     }
-    if (typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > 72) {
-      return res.status(400).json({ message: 'Password is required and must not exceed 72 bytes.' })
-    }
-    const policy = await getPolicy()
-    if (!passwordMeetsPolicy(password, policy)) {
-      return res.status(400).json({ message: `Password must be at least ${policy.min_password_length} characters and meet the configured security policy.` })
-    }
     const [schools] = await pool.execute(
       "SELECT id FROM schools WHERE id = ? AND status = 'active' LIMIT 1",
       [schoolId]
     )
     if (!schools.length) return res.status(400).json({ message: 'Select an active school.' })
+    if (isRegistrar) {
+      const [existingEmployee] = await pool.execute(
+        "SELECT id FROM users WHERE school_id = ? AND employee_id = ? AND role = 'Registrar' LIMIT 1",
+        [schoolId, employeeId]
+      )
+      if (existingEmployee.length) {
+        return res.status(409).json({ message: 'An account with that employee ID already exists at this school.' })
+      }
+    }
     const connection = await pool.getConnection()
     try {
       await connection.beginTransaction()
-      const passwordHash = await bcrypt.hash(password, 10)
+      const passwordHash = await bcrypt.hash(DEFAULT_TEMPORARY_PASSWORD, 10)
+      const accountEmail = cleanEmail || `registrar-${crypto.randomUUID()}@accounts.school.local`
       const [result] = await connection.execute(
         `INSERT INTO users
-          (full_name, email, password, role, grade_level, is_active, registration_source,
-           registered_by, school_id, section, department, subjects, student_number)
-         VALUES (?, ?, ?, ?, ?, TRUE, 'admin', ?, ?, ?, ?, ?, ?)`,
+          (full_name, email, username, phone, employee_id, gender, password, role, grade_level,
+           is_active, registration_source, registered_by, school_id, section, department, subjects,
+           student_number, must_change_password)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'admin', ?, ?, ?, ?, ?, ?, TRUE)`,
         [
           cleanName,
-          cleanEmail,
+          accountEmail,
+          cleanUsername,
+          isRegistrar ? phoneNumber : null,
+          isRegistrar ? employeeId : null,
+          isRegistrar ? gender : null,
           passwordHash,
           role,
           'N/A',
@@ -723,7 +746,11 @@ export async function createUser(req, res, next) {
       return res.status(201).json({
         id: result.insertId,
         name: cleanName,
-        email: cleanEmail,
+        email: cleanEmail || null,
+        username: cleanUsername,
+        employeeId: isRegistrar ? employeeId : null,
+        phoneNumber: isRegistrar ? phoneNumber : null,
+        gender: isRegistrar ? gender : null,
         role,
         schoolId: Number(schoolId),
         gradeLevel: 'N/A',
@@ -737,15 +764,14 @@ export async function createUser(req, res, next) {
     } catch (error) {
       await connection.rollback()
       if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ message: 'An account with that email address already exists.' })
+        return res.status(409).json({ message: 'That email, username, or employee ID is already registered.' })
       }
       throw error
     } finally {
       connection.release()
     }
   } catch (error) {
-    console.error('REGISTRATION ERROR:', error)
-    return res.status(500).json({ message: 'User registration failed due to a server error.' })
+    return next(error)
   }
 }
 
@@ -891,11 +917,11 @@ export async function resetUserPassword(req, res, next) {
     }
     const hash = await bcrypt.hash(password, 10)
     const [result] = await pool.execute(
-      'UPDATE users SET password = ?, password_changed_at = NOW(), failed_login_attempts = 0, locked_until = NULL, token_version = token_version + 1 WHERE id = ?',
+      'UPDATE users SET password = ?, must_change_password = TRUE, password_changed_at = NOW(), failed_login_attempts = 0, locked_until = NULL, token_version = token_version + 1 WHERE id = ?',
       [hash, id]
     )
     if (!result.affectedRows) return res.status(404).json({ message: 'User not found.' })
-    res.json({ message: 'Password reset and account unlocked.' })
+    res.json({ message: 'Password reset. The user must change it at next sign-in.' })
   } catch (error) { next(error) }
 }
 
@@ -930,7 +956,7 @@ export async function getDashboardStats(req, res, next) {
               year.name AS academicYear, semester.name AS semester
        FROM academic_years year
        LEFT JOIN academic_terms semester ON semester.academic_year_id = year.id
-         AND semester.school_id = year.school_id AND semester.is_active = TRUE
+         AND semester.school_id = year.school_id AND semester.is_current = TRUE
        WHERE year.school_id = ? AND year.is_active = TRUE
        ORDER BY year.start_date DESC, semester.start_date DESC LIMIT 1`,
       [schoolId]
@@ -1017,7 +1043,8 @@ export async function getSetup(req, res, next) {
     )
     const [terms] = await pool.execute(
       `SELECT t.id, t.academic_year_id AS academicYearId, t.name,
-              t.start_date AS startDate, t.end_date AS endDate, t.is_active AS isActive
+              t.start_date AS startDate, t.end_date AS endDate, t.is_active AS isActive,
+              t.is_current AS isCurrent
        FROM academic_terms t ${isSchoolAdmin ? 'WHERE t.school_id = ?' : ''} ORDER BY t.start_date`,
       isSchoolAdmin ? [schoolId] : []
     )
@@ -1101,7 +1128,7 @@ export async function saveSetup(req, res, next) {
     await connection.beginTransaction()
     if (saveAcademic) {
       await connection.execute('UPDATE academic_years SET is_active = FALSE WHERE school_id = ?', [schoolId])
-      await connection.execute('UPDATE academic_terms SET is_active = FALSE WHERE school_id = ?', [schoolId])
+      await connection.execute('UPDATE academic_terms SET is_active = FALSE, is_current = FALSE WHERE school_id = ?', [schoolId])
       for (const year of years) {
         await connection.execute(
           `INSERT INTO academic_years (name, start_date, end_date, is_active, school_id)
@@ -1112,10 +1139,10 @@ export async function saveSetup(req, res, next) {
       }
       for (const term of terms) {
         await connection.execute(
-          `INSERT INTO academic_terms (academic_year_id, name, start_date, end_date, is_active, school_id)
-           VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE start_date = VALUES(start_date),
-           end_date = VALUES(end_date), is_active = VALUES(is_active)`,
-          [term.academicYearId, term.name.trim(), term.startDate, term.endDate, term.isActive === true, schoolId]
+          `INSERT INTO academic_terms (academic_year_id, name, start_date, end_date, is_active, is_current, school_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE start_date = VALUES(start_date),
+           end_date = VALUES(end_date), is_active = VALUES(is_active), is_current = VALUES(is_current)`,
+          [term.academicYearId, term.name.trim(), term.startDate, term.endDate, term.isActive === true, term.isActive === true, schoolId]
         )
       }
       for (const section of sections) {

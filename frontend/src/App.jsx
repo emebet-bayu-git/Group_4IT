@@ -4,8 +4,16 @@ import AboutPage from './pages/AboutPage.jsx'
 import ContactPage from './pages/ContactPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import HomePage from './pages/HomePage.jsx'
-import LoginPage, { clearSession, readSessionUser, updateSessionUser } from './pages/LoginPage.jsx'
+import LoginPage, {
+  clearSession,
+  readSessionUser,
+  updateSessionPasswordStatus,
+  updateSessionToken,
+  updateSessionUser,
+} from './pages/LoginPage.jsx'
+import PasswordResetPage from './pages/PasswordResetPage.jsx'
 import MainLayout from './components/MainLayout.jsx'
+import { AcademicProvider } from './contexts/AcademicContext.jsx'
 import { I18nProvider } from './i18n/I18nContext.jsx'
 import { Toaster } from 'react-hot-toast'
 
@@ -44,23 +52,20 @@ function AppContent() {
       name: data.name,
       identifier: data.identifier || credentials.identifier,
       avatarPath: data.avatarPath || '',
+      mustChangePassword: Boolean(data.mustChangePassword),
     }
     setAuthUser(user)
     return { ...data, ...user }
   }
 
   if (authUser) {
-    return (
-      <DashboardPage
+    if (authUser.mustChangePassword) {
+      return <PasswordResetPage
         user={authUser}
-        onUserUpdated={(profile) => {
-          updateSessionUser(profile)
-          setAuthUser((current) => ({
-            ...current,
-            name: profile.name,
-            identifier: String(profile.id),
-            avatarPath: profile.avatarPath || '',
-          }))
+        onPasswordChanged={(token) => {
+          updateSessionToken(token)
+          updateSessionPasswordStatus(false)
+          setAuthUser((current) => ({ ...current, mustChangePassword: false }))
         }}
         onLogout={() => {
           clearSession()
@@ -69,6 +74,28 @@ function AppContent() {
           setPublicView('login')
         }}
       />
+    }
+    return (
+      <AcademicProvider key={authUser.identifier} user={authUser}>
+        <DashboardPage
+          user={authUser}
+          onUserUpdated={(profile) => {
+            updateSessionUser(profile)
+            setAuthUser((current) => ({
+              ...current,
+              name: profile.name,
+              identifier: String(profile.id),
+              avatarPath: profile.avatarPath || '',
+            }))
+          }}
+          onLogout={() => {
+            clearSession()
+            setAuthUser(null)
+            window.history.replaceState({}, '', publicPaths.login)
+            setPublicView('login')
+          }}
+        />
+      </AcademicProvider>
     )
   }
 

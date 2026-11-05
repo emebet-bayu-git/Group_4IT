@@ -5,7 +5,7 @@ import StatusBadge from './ui/Badge.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
 
 const performance = [68, 74, 72, 81, 86]
-const semesters = ['Semester 1', 'Semester 2', 'Semester 3', 'Semester 1', 'Semester 2']
+const semesters = ['Semester 1', 'Semester 2', 'Semester 1', 'Semester 2', 'Semester 1']
 
 const grades = [
   { subject: 'Mathematics', score: 88, grade: 'A', remark: 'Excellent' },

@@ -18,6 +18,7 @@ export default function RoleAssignView() {
   const [selectedRole, setSelectedRole] = useState(leadershipRoles[0].value)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   const requestConfig = useMemo(() => ({
     headers: { Authorization: `Bearer ${readSessionToken()}` },
@@ -25,11 +26,14 @@ export default function RoleAssignView() {
 
   const loadStaff = async () => {
     setLoading(true)
+    setError('')
     try {
       const { data } = await axios.get('/api/admin/users', requestConfig)
       setStaff(data.filter((user) => staffRoles.includes(user.role)))
     } catch (requestError) {
-      toast.error(t(requestError.response?.data?.message || 'Unable to load teachers and registrars.'))
+      const message = requestError.response?.data?.message || 'Unable to load teachers and registrars.'
+      setError(message)
+      toast.error(t(message))
     } finally {
       setLoading(false)
     }
@@ -105,6 +109,12 @@ export default function RoleAssignView() {
           {busy ? t('Assigning…') : t('Assign Role')}
         </button>
       </form>
+
+      {error && (
+        <p role="alert" className="rounded-md border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">
+          {t(error)}
+        </p>
+      )}
 
       {!loading && staff.length === 0 && !error && (
         <p className="rounded-md border border-slate-200 p-4 text-sm text-slate-600">

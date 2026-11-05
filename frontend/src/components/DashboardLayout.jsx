@@ -3,6 +3,7 @@ import AppFooter from './AppFooter.jsx'
 import LanguageSwitcher from './LanguageSwitcher.jsx'
 import ProfileView from './ProfileView.jsx'
 import { useSchoolProfile } from './SchoolIdentity.jsx'
+import { useAcademicContext } from '../contexts/AcademicContext.jsx'
 import {
   Bell,
   BadgeCheck,
@@ -48,7 +49,6 @@ export const dashboardMenuByRole = {
   ],
   Registrar: [
     { id: 'overview', label: 'Student Records', icon: LayoutDashboard },
-    { id: 'enrollment', label: 'Student Enrollment', icon: ClipboardCheck },
     { id: 're-enrollment', label: 'Student Re-Enrollment / Check-In', icon: ClipboardCheck },
     { id: 'section-allocation', label: 'Student Section Allocation', icon: Users },
     { id: 'transcripts', label: 'Grade 9–12 Transcripts', icon: FileText },
@@ -80,8 +80,6 @@ export const dashboardMenuByRole = {
 export default function DashboardLayout({
   children,
   user,
-  academicYear = 'Academic year not configured',
-  semester = '',
   activeTask = 'overview',
   onNavigate,
   onLogout,
@@ -93,8 +91,9 @@ export default function DashboardLayout({
   const [menuOpen, setMenuOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const school = useSchoolProfile()
+  const { period: activeAcademicPeriod, loading: academicPeriodLoading, error: academicPeriodError } = useAcademicContext()
   const { t } = useTranslation()
-  const schoolName = school.school_name || t('Amhara Region Secondary School')
+  const schoolName = activeAcademicPeriod?.schoolName || school.school_name || t('Amhara Region Secondary School')
   const role = user.systemRole || user.role
   const userName = user.name || user.identifier || role
   const canEditProfile = ['Super Admin', 'School Admin', 'Registrar', 'Teacher', 'Headmaster', 'Vice Principal', 'Supervisor'].includes(role)
@@ -154,7 +153,7 @@ export default function DashboardLayout({
       {mobileOpen && <><button type="button" className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setMobileOpen(false)} aria-label={t('Close navigation')} /><aside className="fixed inset-y-0 left-0 z-50 w-72 bg-primary-900 lg:hidden">{sidebar}</aside></>}
       <div className={`flex min-h-screen min-w-0 flex-1 flex-col transition-[margin] ${collapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 bg-emerald-700 px-4 text-white shadow-sm sm:px-6">
-          <div className="flex min-w-0 items-center gap-3"><button className="rounded-md p-2 text-emerald-50 hover:bg-emerald-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t('Open menu')}><Menu className="h-5 w-5" /></button><div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-white/10">{school.logo_path ? <img src={school.logo_path} alt="" className="h-full w-full object-contain" /> : <GraduationCap className="h-6 w-6" />}</div><div className="min-w-0"><p className="truncate text-sm font-bold sm:text-base">{schoolName}</p><p className="truncate text-xs text-emerald-100">{[academicYear, semester].filter(Boolean).map(t).join(' · ') || t('Academic period not configured')}</p></div></div>
+          <div className="flex min-w-0 items-center gap-3"><button className="rounded-md p-2 text-emerald-50 hover:bg-emerald-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t('Open menu')}><Menu className="h-5 w-5" /></button><div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-white/10">{school.logo_path ? <img src={school.logo_path} alt="" className="h-full w-full object-contain" /> : <GraduationCap className="h-6 w-6" />}</div><div className="min-w-0"><p className="truncate text-sm font-bold sm:text-base">{schoolName}</p><p className="truncate text-xs text-emerald-100">{academicPeriodLoading ? t('Loading academic period…') : academicPeriodError ? t(academicPeriodError) : [activeAcademicPeriod?.academicYear, activeAcademicPeriod?.semester].filter(Boolean).map(t).join(' · ') || t('No active academic period')}</p></div></div>
           <div className="flex items-center gap-1 sm:gap-3">
             <button className="relative rounded-md p-2 text-emerald-50 hover:bg-emerald-800" aria-label={t('Notifications')}><Bell className="h-5 w-5" /><span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger-500 ring-2 ring-emerald-700" /></button>
             <LanguageSwitcher />

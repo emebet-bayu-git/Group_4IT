@@ -55,7 +55,8 @@ export async function ensureLocalDefaultAdmin() {
       await connection.execute(
         `UPDATE users SET full_name = 'System Administrator', password = ?, role = 'Super Admin',
          grade_level = 'N/A', is_active = TRUE, registration_source = 'admin',
-         registered_by = NULL, failed_login_attempts = 0, locked_until = NULL, school_id = ?
+         registered_by = NULL, failed_login_attempts = 0, locked_until = NULL,
+         must_change_password = FALSE, school_id = ?
          WHERE id = ?`,
         [passwordHash, schoolId, existing[0].id]
       )
@@ -63,8 +64,8 @@ export async function ensureLocalDefaultAdmin() {
     } else {
       const [result] = await connection.execute(
         `INSERT INTO users
-          (full_name, email, password, role, grade_level, is_active, registration_source, school_id)
-         VALUES (?, ?, ?, 'Super Admin', 'N/A', TRUE, 'admin', ?)` ,
+          (full_name, email, password, role, grade_level, is_active, registration_source, school_id, must_change_password)
+         VALUES (?, ?, ?, 'Super Admin', 'N/A', TRUE, 'admin', ?, FALSE)` ,
         ['System Administrator', email, passwordHash, schoolId]
       )
       console.log(`Created local Super Admin account ID ${result.insertId} for ${email}.`)

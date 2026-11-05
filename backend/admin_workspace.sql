@@ -36,6 +36,9 @@ CALL add_column_if_missing('users', 'registration_source', 'ENUM(''admin'', ''re
 CALL add_column_if_missing('users', 'registered_by', 'INT NULL');
 CALL add_column_if_missing('users', 'username', 'VARCHAR(60) NULL');
 CALL add_column_if_missing('users', 'phone', 'VARCHAR(40) NULL');
+CALL add_column_if_missing('users', 'employee_id', 'VARCHAR(50) NULL');
+CALL add_column_if_missing('users', 'gender', 'ENUM(''Female'', ''Male'') NULL');
+CALL add_column_if_missing('users', 'school_id', 'INT NULL');
 CALL add_column_if_missing('users', 'department', 'VARCHAR(100) NULL');
 CALL add_column_if_missing('users', 'avatar_path', 'VARCHAR(500) NULL');
 CALL add_column_if_missing('student_records', 'graduated_at', 'DATETIME NULL');
@@ -93,6 +96,20 @@ SET @add_username_index_sql = IF(
 PREPARE add_username_index_statement FROM @add_username_index_sql;
 EXECUTE add_username_index_statement;
 DEALLOCATE PREPARE add_username_index_statement;
+
+SET @employee_index_exists = (
+  SELECT COUNT(*) FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'users'
+    AND index_name = 'uq_users_school_employee_id'
+);
+SET @add_employee_index_sql = IF(
+  @employee_index_exists = 0,
+  'ALTER TABLE users ADD UNIQUE KEY uq_users_school_employee_id (school_id, employee_id)',
+  'SELECT 1'
+);
+PREPARE add_employee_index_statement FROM @add_employee_index_sql;
+EXECUTE add_employee_index_statement;
+DEALLOCATE PREPARE add_employee_index_statement;
 
 CREATE TABLE IF NOT EXISTS academic_years (
   id INT AUTO_INCREMENT PRIMARY KEY,

@@ -5,26 +5,35 @@ import { toast } from 'react-hot-toast'
 import Button from './ui/Button.jsx'
 import { readSessionToken } from '../pages/LoginPage.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
+import { useAcademicContext } from '../contexts/AcademicContext.jsx'
 
 const authConfig = () => ({ headers: { Authorization: 'Bearer ' + readSessionToken() } })
 
 export default function ReEnrollmentView() {
   const { t } = useTranslation()
+  const { period: activePeriod, refresh: refreshAcademicPeriod } = useAcademicContext()
   const [search, setSearch] = useState('')
   const [students, setStudents] = useState([])
   const [academicYear, setAcademicYear] = useState('')
+  const [semester, setSemester] = useState('')
   const [loading, setLoading] = useState(true)
   const [checkingIn, setCheckingIn] = useState('')
+  const currentAcademicYear = academicYear || activePeriod?.academicYear || ''
+  const currentSemester = semester || activePeriod?.semester || ''
 
   const load = async () => {
     setLoading(true)
     try {
-      const { data } = await axios.get('/api/registrar/re-enrollment', {
-        ...authConfig(),
-        params: { search },
-      })
+      const [{ data }, refreshedPeriod] = await Promise.all([
+        axios.get('/api/registrar/re-enrollment', {
+          ...authConfig(),
+          params: { search },
+        }),
+        refreshAcademicPeriod(),
+      ])
       setStudents(Array.isArray(data?.students) ? data.students : [])
-      setAcademicYear(data?.academicYear || '')
+      setAcademicYear(refreshedPeriod?.academicYear || data?.academicYear || '')
+      setSemester(refreshedPeriod?.semester || data?.semester || '')
     } catch (error) {
       setStudents([])
       toast.error(t(error.response?.data?.message || 'Unable to load students awaiting check-in.'))
@@ -36,18 +45,18 @@ export default function ReEnrollmentView() {
   useEffect(() => { load() }, [search])
 
   const checkIn = async (student) => {
-    if (!academicYear) {
+    if (!currentAcademicYear || !currentSemester) {
       toast.error(t('Configure an active academic year before checking students in.'))
       return
     }
     if (!window.confirm(t('Confirm that {name} has completed re-enrollment for {year}?', {
       name: student.name,
-      year: academicYear,
+      year: currentAcademicYear,
     }))) return
     setCheckingIn(String(student.id))
     try {
       await axios.post(`/api/registrar/re-enrollment/${student.id}/check-in`, {}, authConfig())
-      toast.success(t('{name} checked in for {year}.', { name: student.name, year: academicYear }))
+      toast.success(t('{name} checked in for {year}.', { name: student.name, year: currentAcademicYear }))
       await load()
     } catch (error) {
       toast.error(t(error.response?.data?.message || 'Unable to check in this student.'))
@@ -62,7 +71,8 @@ export default function ReEnrollmentView() {
         <p className="text-sm font-semibold text-primary-700">{t('Registrar workspace')}</p>
         <h1 id="reenrollment-heading" className="mt-1 text-2xl font-bold text-slate-900">{t('Student Re-Enrollment / Check-In')}</h1>
         <p className="mt-1 text-sm text-slate-500">{t('Confirm returning and promoted students for the active academic year before section assignment.')}</p>
-        <p className="mt-2 text-sm font-semibold text-primary-800">{t('Active academic year')}: {academicYear || t('Not configured')}</p>
+        <p className="mt-2 text-sm font-semibold text-primary-800">{t('Active academic period')}: {currentAcademicYear || t('No active academic period')}{currentSemester ? ` · ${t(currentSemester)}` : ''}</p>
+        {!currentAcademicYear && <p role="status" className="mt-2 text-sm text-warning-700">{t('Your school has no active academic year and current semester. Ask the School Admin to mark them active in Academic Infrastructure.')}</p>}
       </header>
 
       <label className="relative block max-w-xl">
@@ -100,7 +110,7 @@ export default function ReEnrollmentView() {
                   <td className="px-4 py-3 text-warning-700">{t(student.sectionStatus)}</td>
                   <td className="px-4 py-3">
                     <Button
-                      disabled={!academicYear || Boolean(checkingIn)}
+                      disabled={!currentAcademicYear || !currentSemester || loading || Boolean(checkingIn)}
                       loading={checkingIn === String(student.id)}
                       onClick={() => checkIn(student)}
                     >

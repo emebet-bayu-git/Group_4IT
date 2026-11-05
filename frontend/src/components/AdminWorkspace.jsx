@@ -23,7 +23,7 @@ const registrationRoles = [
   { role: 'School Admin', label: 'School Admin' },
   { role: 'Registrar', label: 'Registrar' },
 ]
-const blankUser = { name: '', email: '', password: '', role: 'School Admin', schoolId: '' }
+const blankUser = { name: '', email: '', role: 'School Admin', schoolId: '' }
 const userFilters = [
   { label: 'All', role: null },
   { label: 'School Admins', role: 'School Admin' },
@@ -82,8 +82,8 @@ export default function AdminWorkspace({ activeTask }) {
   const [activityLogs, setActivityLogs] = useState([])
   const [newSchool, setNewSchool] = useState(blankRegisteredSchool)
   const [editingSchoolId, setEditingSchoolId] = useState(null)
-  const [registrationRole, setRegistrationRole] = useState('School Admin')
-  const [newUser, setNewUser] = useState(blankUser)
+  const [registrationRole, setRegistrationRole] = useState(activeTask === 'staff-registration' ? 'Registrar' : 'School Admin')
+  const [newUser, setNewUser] = useState({ ...blankUser, role: activeTask === 'staff-registration' ? 'Registrar' : 'School Admin' })
   const [setup, setSetup] = useState({ years: [], terms: [], sections: [], school: { ...blankSchool } })
   const [delegations, setDelegations] = useState([])
   const [archived, setArchived] = useState([])
@@ -353,9 +353,9 @@ export default function AdminWorkspace({ activeTask }) {
         </SectionTitle>
       </>}
 
-      {canRegisterUsers && <SectionTitle title={isSuperAdmin ? 'Register School Admin' : isSchoolAdmin ? activeTask === 'staff-registration' ? 'Register School Staff' : 'User accounts' : 'User accounts'} description={isSuperAdmin ? 'Manage School Admin accounts and review their assigned schools. Only School Admin users are shown here.' : isSchoolAdmin ? activeTask === 'staff-registration' ? 'Onboard Woreda-deployed teachers and create Registrar accounts for your assigned school.' : 'Manage accounts for your assigned school.' : 'Activate accounts, manage roles, reset passwords, and clear login lockouts.'}>
+      {canRegisterUsers && <SectionTitle title={isSuperAdmin ? 'Register School Admin' : isSchoolAdmin ? activeTask === 'staff-registration' ? 'Register School Staff' : 'User accounts' : 'User accounts'} description={isSuperAdmin ? 'Manage School Admin accounts and review their assigned schools. Only School Admin users are shown here.' : isSchoolAdmin ? activeTask === 'staff-registration' ? '' : 'Manage accounts for your assigned school.' : 'Activate accounts, manage roles, reset passwords, and clear login lockouts.'}>
         {['all-users', 'staff-registration'].includes(activeTask) && <div className="w-full space-y-5">
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4" role="tablist" aria-label={t('Choose user type to register')}>
+          {activeTask === 'all-users' && <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4" role="tablist" aria-label={t('Choose user type to register')}>
             {visibleRegistrationRoles.map(({ role: itemRole }) => <button
               key={itemRole}
               id={`register-tab-${itemRole.replaceAll(' ', '-')}`}
@@ -369,13 +369,12 @@ export default function AdminWorkspace({ activeTask }) {
               }}
               className={`rounded-md border px-3 py-2 text-sm font-semibold transition ${registrationRole === itemRole ? 'border-primary-800 bg-primary-800 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
             >{t('Register {role}', { role: t(itemRole) })}</button>)}
-          </div>
-          <form id="user-registration-form" role="tabpanel" aria-labelledby={`register-tab-${registrationRole.replaceAll(' ', '-')}`} onSubmit={registerUser} className="space-y-4 rounded-md bg-slate-50 p-4">
+          </div>}
+          <form id={activeTask === 'all-users' ? 'user-registration-form' : undefined} role={activeTask === 'all-users' ? 'tabpanel' : undefined} aria-labelledby={activeTask === 'all-users' ? `register-tab-${registrationRole.replaceAll(' ', '-')}` : undefined} onSubmit={registerUser} className="space-y-4 rounded-md bg-slate-50 p-4">
             <h3 className="font-semibold text-slate-900">{t('Register {role}', { role: t(registrationRole) })}</h3>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Field label={registrationRole === 'Student' ? 'Student name' : 'Name'} required maxLength={100} autoComplete="name" value={newUser.name} onChange={(event) => setNewUser({ ...newUser, name: event.target.value })} />
               <Field label="Email" type="email" required maxLength={100} autoComplete="email" value={newUser.email} onChange={(event) => setNewUser({ ...newUser, email: event.target.value })} />
-              <Field label="Password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={newUser.password} onChange={(event) => setNewUser({ ...newUser, password: event.target.value })} />
               {isSchoolAdmin
                 ? <p className="self-end rounded-md bg-white p-3 text-sm text-slate-600">{t('New accounts will be assigned to your school.')}</p>
                   : <label className="block text-sm font-medium text-slate-700">{t(registrationRole === 'School Admin' ? 'Assigned School ID' : 'Assigned School')}<select required value={newUser.schoolId} onChange={(event) => setNewUser({ ...newUser, schoolId: event.target.value })} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"><option value="">{t('Select an active school')}</option>{schools.filter((school) => school.status === 'active').map((school) => <option key={school.id} value={school.id}>{registrationRole === 'School Admin' ? `${school.id} — ${school.name}` : school.name}</option>)}</select></label>}

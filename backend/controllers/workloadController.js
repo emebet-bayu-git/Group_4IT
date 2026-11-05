@@ -17,7 +17,7 @@ async function getActivePeriod(executor, schoolId) {
     `SELECT year.id AS academicYearId, term.id AS termId
      FROM academic_years year
      JOIN academic_terms term ON term.academic_year_id = year.id AND term.school_id = year.school_id
-     WHERE year.school_id = ? AND year.is_active = TRUE AND term.is_active = TRUE
+     WHERE year.school_id = ? AND year.is_active = TRUE AND term.is_current = TRUE
      ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
     [schoolId]
   )

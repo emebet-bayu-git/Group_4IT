@@ -76,15 +76,20 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('users', 'failed_login_attempts', 'INT UNSIGNED NOT NULL DEFAULT 0')
   await ensureColumn('users', 'locked_until', 'DATETIME NULL')
   await ensureColumn('users', 'password_changed_at', 'DATETIME NULL')
+  await ensureColumn('users', 'must_change_password', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await pool.query('ALTER TABLE users MODIFY must_change_password BOOLEAN NOT NULL DEFAULT TRUE')
   await ensureColumn('users', 'token_version', 'INT UNSIGNED NOT NULL DEFAULT 0')
   await ensureColumn('users', 'registration_source', "ENUM('admin', 'registrar', 'pending') NOT NULL DEFAULT 'pending'")
   await ensureColumn('users', 'registered_by', 'INT NULL')
   await ensureColumn('users', 'school_id', 'INT NULL')
   await ensureColumn('users', 'username', 'VARCHAR(60) NULL')
+  await ensureColumn('users', 'employee_id', 'VARCHAR(50) NULL')
+  await ensureColumn('users', 'gender', "ENUM('Female', 'Male') NULL")
   await ensureColumn('users', 'section', 'VARCHAR(30) NULL')
   await ensureColumn('users', 'department', 'VARCHAR(100) NULL')
   await ensureColumn('users', 'subjects', 'TEXT NULL')
   await ensureColumn('users', 'student_number', 'VARCHAR(50) NULL')
+  await pool.execute("UPDATE users SET must_change_password = FALSE WHERE role = 'Super Admin'")
   await pool.query(`ALTER TABLE users MODIFY role ENUM(
     'Super Admin',
     'School Admin',
@@ -231,6 +236,7 @@ export async function ensureAdminWorkspaceSchema() {
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    is_current BOOLEAN NOT NULL DEFAULT FALSE,
     school_id INT NOT NULL DEFAULT 1,
     UNIQUE KEY uq_academic_year_school_name (school_id, name)
   )`)
@@ -277,6 +283,14 @@ export async function ensureAdminWorkspaceSchema() {
   )
   if (!usernameIndex.length) {
     await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_users_username (username)')
+  }
+  const [employeeIndex] = await pool.execute(
+    `SELECT 1 FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'users'
+       AND index_name = 'uq_users_school_employee_id' LIMIT 1`
+  )
+  if (!employeeIndex.length) {
+    await pool.query('ALTER TABLE users ADD UNIQUE KEY uq_users_school_employee_id (school_id, employee_id)')
   }
   await pool.query(`CREATE TABLE IF NOT EXISTS teachers (
     id INT PRIMARY KEY,
@@ -365,6 +379,22 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('academic_years', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureColumn('academic_terms', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureColumn('academic_terms', 'is_active', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await ensureColumn('academic_terms', 'is_current', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+    migration_key VARCHAR(100) PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`)
+  const [currentSemesterMigration] = await pool.execute(
+    `SELECT 1 FROM schema_migrations
+     WHERE migration_key = 'academic_terms_current_flag' LIMIT 1`
+  )
+  if (!currentSemesterMigration.length) {
+    await pool.query('UPDATE academic_terms SET is_current = is_active')
+    await pool.execute(
+      `INSERT INTO schema_migrations (migration_key)
+       VALUES ('academic_terms_current_flag')`
+    )
+  }
   await ensureColumn('school_sections', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureColumn('school_sections', 'academic_year_id', 'INT NULL')
   await ensureColumn('school_sections', 'academic_term_id', 'INT NULL')
@@ -372,6 +402,11 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureSchoolScopedUniqueIndex('academic_years', 'uq_academic_year_school_name', ['school_id', 'name'], ['name'])
   await ensureSchoolScopedUniqueIndex('school_sections', 'uq_school_period_grade_section', ['school_id', 'academic_year_id', 'academic_term_id', 'grade_level', 'section_name'], ['grade_level', 'section_name'])
   await ensureSchoolScopedUniqueIndex('school_sections', 'uq_school_period_grade_section', ['school_id', 'academic_year_id', 'academic_term_id', 'grade_level', 'section_name'], ['school_id', 'grade_level', 'section_name'])
+  await ensureForeignKey(
+    'academic_terms',
+    'fk_term_year',
+    'ALTER TABLE academic_terms ADD CONSTRAINT fk_term_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE'
+  )
   await ensureForeignKey(
     'school_sections',
     'fk_school_section_year',

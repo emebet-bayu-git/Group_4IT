@@ -10,8 +10,13 @@ import { authenticateUser, authorizeRoles } from '../middleware/authMiddleware.j
 const router = Router()
 router.use(authenticateUser)
 
-router.get('/active-year', authorizeRoles('School Admin', 'Registrar'), getActiveAcademicPeriod)
-router.get('/active', authorizeRoles('School Admin', 'Registrar'), getActiveAcademicPeriod)
+const schoolWorkspaceRoles = [
+  'School Admin', 'Registrar', 'Teacher', 'Student', 'Headmaster',
+  'Vice Principal', 'Supervisor', 'Admin',
+]
+router.get('/active-context', authorizeRoles(...schoolWorkspaceRoles), getActiveAcademicPeriod)
+router.get('/active-year', authorizeRoles(...schoolWorkspaceRoles), getActiveAcademicPeriod)
+router.get('/active', authorizeRoles(...schoolWorkspaceRoles), getActiveAcademicPeriod)
 router.use(authorizeRoles('School Admin'))
 router.get('/years', listAcademicYears)
 router.post('/years', createAcademicYear)

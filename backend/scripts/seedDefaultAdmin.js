@@ -37,8 +37,8 @@ if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       } else {
         const [result] = await pool.execute(
           `INSERT INTO users
-            (full_name, email, password, role, grade_level, is_active, registration_source)
-           VALUES (?, ?, ?, 'Super Admin', 'N/A', TRUE, 'admin')`,
+            (full_name, email, password, role, grade_level, is_active, registration_source, must_change_password)
+           VALUES (?, ?, ?, 'Super Admin', 'N/A', TRUE, 'admin', FALSE)`,
           ['System Administrator', email, await bcrypt.hash(password, 10)]
         )
         console.log(`Created Super Admin account ID ${result.insertId} for ${email}.`)

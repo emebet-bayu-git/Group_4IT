@@ -15,6 +15,18 @@ export function updateSessionToken(token) {
   storage.setItem('sims_auth_token', token)
 }
 
+export function updateSessionPasswordStatus(mustChangePassword) {
+  const storage = localStorage.getItem('sims_auth_token') ? localStorage : sessionStorage
+  const savedUser = storage.getItem('sims_auth_user')
+  if (!savedUser) return
+  try {
+    const user = JSON.parse(savedUser)
+    storage.setItem('sims_auth_user', JSON.stringify({ ...user, mustChangePassword }))
+  } catch (error) {
+    console.error('Unable to update saved sign-in password status:', error.message)
+  }
+}
+
 export function updateSessionUser(profile) {
   const storage = localStorage.getItem('sims_auth_token') ? localStorage : sessionStorage
   const savedUser = storage.getItem('sims_auth_user')
@@ -49,6 +61,7 @@ export function readSessionUser() {
           name: typeof user.name === 'string' ? user.name : '',
           identifier: typeof user.identifier === 'string' ? user.identifier : '',
           avatarPath: typeof user.avatarPath === 'string' ? user.avatarPath : '',
+          mustChangePassword: Boolean(user.mustChangePassword),
         }
       }
     } catch (error) {
@@ -72,6 +85,7 @@ export function storeSessionToken(token, rememberMe, user) {
     name: user.name || user.identifier || '',
     identifier: user.identifier || '',
     avatarPath: user.avatarPath || '',
+    mustChangePassword: Boolean(user.mustChangePassword),
   }))
 }
 
@@ -79,7 +93,7 @@ export function clearSession() {
   for (const storage of [localStorage, sessionStorage]) {
     for (let index = storage.length - 1; index >= 0; index -= 1) {
       const key = storage.key(index)
-      if (key?.startsWith('sims_auth_')) storage.removeItem(key)
+      if (key?.startsWith('sims_auth_') || key?.startsWith('sims_academic_context_')) storage.removeItem(key)
     }
   }
 }
@@ -122,6 +136,7 @@ export default function LoginPage({ onLogin, onBack }) {
         name: result.name || identifier,
         identifier: result.identifier || identifier,
         avatarPath: result.avatarPath || '',
+        mustChangePassword: Boolean(result.mustChangePassword),
       })
     } catch (requestError) {
       toast.error(t(requestError.response?.data?.message || requestError.message || 'Unable to sign in. Check your details and try again.'))

@@ -6,11 +6,12 @@ import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import ExcelJS from 'exceljs'
 import { pool } from '../config/db.js'
+import { DEFAULT_TEMPORARY_PASSWORD } from '../utils/accountDefaults.js'
 
 const studentPhotoDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../uploads/students')
 const studentGrades = ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12']
+const confirmedEnrollmentSql = "LOWER(TRIM(section_status)) IN ('confirmed / enrolled', 'confirmed', 'enrolled')"
 const legacyAcademicOptions = {
-  years: ['2026/2027', '2027/2028'],
   sections: studentGrades.flatMap((gradeLevel) => (
     ['Section A', 'Section B', 'Section C'].map((sectionName) => ({ gradeLevel, sectionName }))
   )),
@@ -19,11 +20,11 @@ const legacyAcademicOptions = {
 async function getConfiguredAcademicOptions(executor = pool, schoolId = null) {
   const yearScope = schoolId ? ' WHERE school_id = ?' : ''
   const scopeValues = schoolId ? [schoolId] : []
-  const [activeYears] = await executor.execute(
-    `SELECT name FROM academic_years WHERE is_active = TRUE${schoolId ? ' AND school_id = ?' : ''} ORDER BY start_date DESC`,
+  const [configuredYears] = await executor.execute(
+    `SELECT name FROM academic_years${yearScope}
+     ORDER BY is_active DESC, start_date DESC`,
     scopeValues
   )
-  const [[yearCount]] = await executor.execute(`SELECT COUNT(*) AS total FROM academic_years${yearScope}`, scopeValues)
   const [activeSections] = await executor.execute(
     `SELECT grade_level AS gradeLevel, section_name AS sectionName
      FROM school_sections WHERE is_active = TRUE${schoolId ? ' AND school_id = ?' : ''} ORDER BY grade_level, section_name`,
@@ -31,7 +32,7 @@ async function getConfiguredAcademicOptions(executor = pool, schoolId = null) {
   )
   const [[sectionCount]] = await executor.execute(`SELECT COUNT(*) AS total FROM school_sections${yearScope}`, scopeValues)
   return {
-    years: activeYears.length ? activeYears.map((row) => row.name) : Number(yearCount.total) ? [] : legacyAcademicOptions.years,
+    years: configuredYears.map((row) => row.name),
     sections: activeSections.length ? activeSections : Number(sectionCount.total) ? [] : legacyAcademicOptions.sections,
   }
 }
@@ -48,7 +49,7 @@ async function getActiveSectionId(executor, schoolId, grade, sectionName) {
            WHERE activeYear.id = school_sections.academic_year_id
              AND activeTerm.id = school_sections.academic_term_id
              AND activeYear.school_id = school_sections.school_id
-             AND activeYear.is_active = TRUE AND activeTerm.is_active = TRUE
+             AND activeYear.is_active = TRUE AND activeTerm.is_current = TRUE
          ))
      ORDER BY academic_year_id DESC, academic_term_id DESC, id DESC LIMIT 1`,
     [schoolId, grade, sectionName]
@@ -61,8 +62,8 @@ async function getCurrentAcademicPeriod(executor, schoolId) {
     `SELECT year.id AS academicYearId, year.name AS academicYear,
             term.id AS termId, term.name AS semester
      FROM academic_years year
-     LEFT JOIN academic_terms term ON term.academic_year_id = year.id
-       AND term.school_id = year.school_id AND term.is_active = TRUE
+     JOIN academic_terms term ON term.academic_year_id = year.id
+       AND term.school_id = year.school_id AND term.is_current = TRUE
      WHERE year.school_id = ? AND year.is_active = TRUE
      ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
     [schoolId]
@@ -91,8 +92,12 @@ async function removeStoredStudentPhoto(photoUrl) {
 }
 
 async function getAccountSchoolId(userId) {
-  const [[user]] = await pool.execute('SELECT school_id FROM users WHERE id = ? LIMIT 1', [userId])
+  const [[user]] = await pool.execute(
+    'SELECT school_id, role FROM users WHERE id = ? AND is_active = TRUE LIMIT 1',
+    [userId]
+  )
   if (user?.school_id) return user.school_id
+  if (user?.role !== 'School Admin') return null
   const [assignments] = await pool.execute(
     'SELECT school_id FROM school_admin_assignments WHERE user_id = ? ORDER BY assigned_at DESC LIMIT 1',
     [userId]
@@ -121,6 +126,49 @@ function sectionSuffix(index) {
   return suffix
 }
 
+function compareSectionNames(left, right) {
+  const sectionIndex = (name) => {
+    const suffix = /^Section\s+([A-Z]+)$/i.exec(name)?.[1]?.toUpperCase()
+    if (!suffix) return null
+    return [...suffix].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0)
+  }
+  const leftIndex = sectionIndex(left)
+  const rightIndex = sectionIndex(right)
+  if (leftIndex !== null && rightIndex !== null) return leftIndex - rightIndex
+  if (leftIndex !== null) return -1
+  if (rightIndex !== null) return 1
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function sortAllocationStudents(students, order) {
+  const alphabetical = (left, right) => (
+    left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }) || Number(left.userId) - Number(right.userId)
+  )
+  if (order === 'studentId') {
+    return [...students].sort((left, right) => {
+      const leftId = String(left.studentNumber || left.userId).trim()
+      const rightId = String(right.studentNumber || right.userId).trim()
+      if (/^\d+$/.test(leftId) && /^\d+$/.test(rightId)) {
+        const leftNumber = BigInt(leftId)
+        const rightNumber = BigInt(rightId)
+        return leftNumber < rightNumber ? -1 : leftNumber > rightNumber ? 1 : 0
+      }
+      return leftId.localeCompare(rightId, undefined, { numeric: true, sensitivity: 'base' })
+    })
+  }
+  if (order !== 'gender') return [...students].sort(alphabetical)
+
+  const female = students.filter((student) => student.gender === 'Female').sort(alphabetical)
+  const male = students.filter((student) => student.gender === 'Male').sort(alphabetical)
+  const unknown = students.filter((student) => !['Female', 'Male'].includes(student.gender)).sort(alphabetical)
+  const balanced = []
+  for (let femaleIndex = 0, maleIndex = 0; femaleIndex < female.length || maleIndex < male.length;) {
+    if (femaleIndex < female.length) balanced.push(female[femaleIndex++])
+    if (maleIndex < male.length) balanced.push(male[maleIndex++])
+  }
+  return balanced.concat(unknown)
+}
+
 export async function listStudents(req, res, next) {
   try {
     const schoolId = await getAccountSchoolId(req.user.id)
@@ -138,6 +186,7 @@ export async function listStudents(req, res, next) {
                   student.academic_year AS academicYear,
                   student.academic_status AS academicStatus,
                   student.section_status AS sectionStatus,
+                  student.section_id AS sectionId,
                   COALESCE(student.emergency_contact_phone, student.emergency_contact) AS emergencyContact,
                   student.emergency_contact_name AS emergencyContactName,
                   student.registration_date AS registrationDate,
@@ -161,7 +210,7 @@ export async function getRegistrarSectionAllocation(req, res, next) {
     const schoolId = await getAccountSchoolId(req.user.id)
     if (!schoolId) return res.status(403).json({ message: 'Your Registrar account is not assigned to a school.' })
     const period = await getCurrentAcademicPeriod(pool, schoolId)
-    if (!period) return res.status(409).json({ message: 'Configure an active academic year before section allocation.' })
+    if (!period) return res.status(409).json({ message: 'Configure an active academic year and current semester before section allocation.' })
     const [sections] = await pool.execute(
       `SELECT section.id, section.grade_level AS gradeLevel,
               section.section_name AS sectionName,
@@ -170,40 +219,61 @@ export async function getRegistrarSectionAllocation(req, res, next) {
        LEFT JOIN students student ON student.section_id = section.id
          AND student.school_id = section.school_id
          AND student.status = 'Active'
-         AND student.section_status = 'Confirmed / Enrolled'
-         AND student.enrollment_year_id = ?
+         AND ${confirmedEnrollmentSql}
+         AND (student.enrollment_year_id = ?
+           OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
        WHERE section.school_id = ? AND section.grade_level = ? AND section.is_active = TRUE
          AND ((section.academic_year_id = ? AND (? IS NULL OR section.academic_term_id = ?))
            OR (section.academic_year_id IS NULL AND section.academic_term_id IS NULL))
        GROUP BY section.id, section.grade_level, section.section_name
        ORDER BY section.section_name`,
-      [period.academicYearId, schoolId, grade, period.academicYearId, period.termId, period.termId]
+      [period.academicYearId, period.academicYear, schoolId, grade, period.academicYearId, period.termId, period.termId]
     )
     const [students] = await pool.execute(
-      `SELECT student.id, student.user_id AS userId, student.full_name AS name,
+      `SELECT student.id, student.user_id AS userId, account.student_number AS studentNumber,
+              student.full_name AS name,
               student.gender, student.section
        FROM students student
-       WHERE student.school_id = ? AND student.status = 'Unassigned'
-         AND student.section_status = 'Confirmed / Enrolled'
-         AND student.enrollment_year_id = ?
-         AND COALESCE(student.grade, student.grade_level) = ?
+       JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
+       WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
+         AND ${confirmedEnrollmentSql}
+         AND (student.enrollment_year_id = ?
+           OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
+         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?
          AND student.section_id IS NULL
        ORDER BY student.full_name, student.user_id`,
-      [schoolId, period.academicYearId, grade]
+      [schoolId, period.academicYearId, period.academicYear, grade]
+    )
+    const [assignedStudents] = await pool.execute(
+      `SELECT student.id, student.user_id AS userId, student.full_name AS name,
+              student.gender, student.section_id AS sectionId, section.section_name AS sectionName
+       FROM students student
+       JOIN school_sections section ON section.id = student.section_id
+         AND section.school_id = student.school_id
+       WHERE student.school_id = ? AND student.status = 'Active'
+         AND ${confirmedEnrollmentSql}
+         AND (student.enrollment_year_id = ?
+           OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
+         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?
+       ORDER BY section.section_name, student.full_name, student.user_id`,
+      [schoolId, period.academicYearId, period.academicYear, grade]
     )
     const [gradeCounts] = await pool.execute(
-      `SELECT COALESCE(grade, grade_level) AS gradeLevel, COUNT(*) AS studentCount
+      `SELECT COALESCE(NULLIF(grade, ''), grade_level) AS gradeLevel, COUNT(*) AS studentCount
        FROM students
-       WHERE school_id = ? AND status = 'Unassigned' AND section_id IS NULL
-         AND section_status = 'Confirmed / Enrolled'
-         AND enrollment_year_id = ?
-       GROUP BY COALESCE(grade, grade_level)`,
-      [schoolId, period.academicYearId]
+       WHERE school_id = ? AND status IN ('Unassigned', 'Active') AND section_id IS NULL
+         AND ${confirmedEnrollmentSql}
+         AND (enrollment_year_id = ?
+           OR (enrollment_year_id IS NULL AND academic_year = ?))
+       GROUP BY COALESCE(NULLIF(grade, ''), grade_level)`,
+      [schoolId, period.academicYearId, period.academicYear]
     )
     return res.json({
       sections: sections.map((section) => ({ ...section, studentCount: Number(section.studentCount) })),
       students,
+      assignedStudents,
       academicYear: period.academicYear,
+      semester: period.semester,
       gradeCounts: studentGrades.map((gradeLevel) => ({
         gradeLevel,
         studentCount: Number(gradeCounts.find((row) => row.gradeLevel === gradeLevel)?.studentCount || 0),
@@ -236,6 +306,7 @@ export async function listRegistrarReEnrollment(req, res, next) {
          AND account.is_active = TRUE
        WHERE student.school_id = ?
          AND student.status = 'Unassigned'
+         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) IN ('Grade 10', 'Grade 11', 'Grade 12')
          AND student.section_status IN ('Pending Check-In', 'Pending Re-Enrollment')
          AND student.academic_status NOT IN ('Transferred', 'Withdrawn')
          AND (? IS NULL OR student.promoted_from_year_id IS NULL
@@ -249,6 +320,7 @@ export async function listRegistrarReEnrollment(req, res, next) {
     return res.json({
       academicYear: period?.academicYear ?? null,
       academicYearId: period?.academicYearId ?? null,
+      semester: period?.semester ?? null,
       students,
     })
   } catch (error) {
@@ -281,6 +353,7 @@ export async function checkInRegistrarStudent(req, res, next) {
          AND account.is_active = TRUE
        WHERE student.user_id = ? AND student.school_id = ?
          AND student.status = 'Unassigned'
+         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) IN ('Grade 10', 'Grade 11', 'Grade 12')
          AND student.academic_status NOT IN ('Transferred', 'Withdrawn')
        FOR UPDATE`,
       [req.params.id, schoolId]
@@ -333,6 +406,200 @@ export async function checkInRegistrarStudent(req, res, next) {
   }
 }
 
+export async function previewRegistrarSections(req, res, next) {
+  const body = req.body ?? {}
+  const grade = typeof body.grade === 'string' ? body.grade : ''
+  const capacity = Number(body.capacity)
+  const sortBy = body.sortBy || 'alphabetical'
+  if (!studentGrades.includes(grade)
+    || !Number.isInteger(capacity) || capacity < 1 || capacity > 200
+    || !['alphabetical', 'studentId', 'gender'].includes(sortBy)
+  ) {
+    return res.status(400).json({ message: 'Choose a valid grade, capacity, and allocation order.' })
+  }
+  try {
+    const schoolId = await getAccountSchoolId(req.user.id)
+    if (!schoolId) return res.status(403).json({ message: 'Your Registrar account is not assigned to a school.' })
+    const period = await getCurrentAcademicPeriod(pool, schoolId)
+    if (!period) return res.status(409).json({ message: 'Configure an active academic year and current semester before section allocation.' })
+    const [sections] = await pool.execute(
+      `SELECT id, section_name AS sectionName FROM school_sections
+       WHERE school_id = ? AND grade_level = ? AND is_active = TRUE
+         AND ((academic_year_id = ? AND academic_term_id = ?)
+           OR (academic_year_id IS NULL AND academic_term_id IS NULL))
+       ORDER BY section_name`,
+      [schoolId, grade, period.academicYearId, period.termId]
+    )
+    const [students] = await pool.execute(
+      `SELECT student.id, student.user_id AS userId,
+              account.student_number AS studentNumber, student.full_name AS name, student.gender
+       FROM students student
+       JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
+       WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
+         AND LOWER(TRIM(student.section_status)) IN ('confirmed / enrolled', 'confirmed', 'enrolled')
+         AND (student.enrollment_year_id = ?
+           OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
+         AND student.section_id IS NULL
+         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?`,
+      [schoolId, period.academicYearId, period.academicYear, grade]
+    )
+    const [counts] = await pool.execute(
+      `SELECT section_id AS sectionId, COUNT(*) AS assigned,
+              SUM(gender = 'Female') AS femaleCount, SUM(gender = 'Male') AS maleCount
+       FROM students WHERE school_id = ? AND status = 'Active'
+         AND ${confirmedEnrollmentSql}
+         AND (enrollment_year_id = ?
+           OR (enrollment_year_id IS NULL AND academic_year = ?))
+         AND section_id IS NOT NULL
+       GROUP BY section_id`,
+      [schoolId, period.academicYearId, period.academicYear]
+    )
+    const countsBySection = new Map(counts.map((row) => [Number(row.sectionId), {
+      assigned: Number(row.assigned),
+      Female: Number(row.femaleCount),
+      Male: Number(row.maleCount),
+    }]))
+    let planningSections = sections.map((section) => ({
+      ...section,
+      assigned: countsBySection.get(Number(section.id))?.assigned || 0,
+      isNew: false,
+    }))
+    const capacityAvailable = () => planningSections.reduce(
+      (total, section) => total + Math.max(0, capacity - section.assigned), 0
+    )
+    const neededSections = Math.ceil(Math.max(0, students.length - capacityAvailable()) / capacity)
+    if (neededSections) {
+      const [usedRows] = await pool.execute(
+        `SELECT section_name AS sectionName FROM school_sections
+         WHERE school_id = ? AND grade_level = ?
+           AND ((academic_year_id = ? AND academic_term_id = ?)
+             OR (academic_year_id IS NULL AND academic_term_id IS NULL))`,
+        [schoolId, grade, period.academicYearId, period.termId]
+      )
+      const usedNames = new Set(usedRows.map((row) => row.sectionName.toLowerCase()))
+      let suffix = 0
+      while (planningSections.filter((section) => section.isNew).length < neededSections) {
+        const sectionName = `Section ${sectionSuffix(suffix++)}`
+        if (usedNames.has(sectionName.toLowerCase())) continue
+        planningSections.push({
+          id: null, sectionName, assigned: 0, Female: 0, Male: 0, isNew: true,
+        })
+        usedNames.add(sectionName.toLowerCase())
+      }
+    }
+    planningSections.sort((a, b) => compareSectionNames(a.sectionName, b.sectionName))
+
+    const ordered = sortAllocationStudents(students, sortBy)
+
+    const assignments = []
+    for (const student of ordered) {
+      const destination = planningSections.find((section) => section.assigned < capacity)
+      if (!destination) break
+      destination.assigned += 1
+      assignments.push({
+        studentId: student.id,
+        userId: student.userId,
+        studentNumber: student.studentNumber,
+        name: student.name,
+        gender: student.gender,
+        sectionId: destination.id,
+        sectionName: destination.sectionName,
+        isNewSection: destination.isNew,
+      })
+    }
+    return res.json({
+      academicYear: period.academicYear,
+      semester: period.semester,
+      grade,
+      capacity,
+      sortBy,
+      assignments,
+      sections: planningSections.map(({ id, sectionName, assigned, isNew }) => ({
+        id, sectionName, assigned, isNew, capacity,
+      })),
+    })
+  } catch (error) {
+    return next(error)
+  }
+}
+
+export async function transferRegistrarStudent(req, res, next) {
+  if (!validId(req.params.studentId)) return res.status(400).json({ message: 'Provide a valid student ID.' })
+  const { sectionId, capacity } = req.body ?? {}
+  if (!validId(sectionId) || !Number.isInteger(Number(capacity)) || Number(capacity) < 1 || Number(capacity) > 200) {
+    return res.status(400).json({ message: 'Choose a valid target section and capacity.' })
+  }
+  let connection
+  try {
+    const schoolId = await getAccountSchoolId(req.user.id)
+    if (!schoolId) return res.status(403).json({ message: 'Your Registrar account is not assigned to a school.' })
+    connection = await pool.getConnection()
+    await connection.beginTransaction()
+    const period = await getCurrentAcademicPeriod(connection, schoolId)
+    if (!period) {
+      await connection.rollback()
+      return res.status(409).json({ message: 'Configure an active academic year and current semester before transferring students.' })
+    }
+    const [[student]] = await connection.execute(
+      `SELECT id, user_id AS userId, COALESCE(grade, grade_level) AS gradeLevel,
+              section_id AS sectionId
+       FROM students WHERE user_id = ? AND school_id = ? AND status = 'Active'
+         AND ${confirmedEnrollmentSql} AND enrollment_year_id = ?
+         AND section_id IS NOT NULL FOR UPDATE`,
+      [req.params.studentId, schoolId, period.academicYearId]
+    )
+    if (!student) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Student is not assigned in your school for the active academic year.' })
+    }
+    const [[section]] = await connection.execute(
+      `SELECT id, section_name AS sectionName FROM school_sections
+       WHERE id = ? AND school_id = ? AND grade_level = ? AND is_active = TRUE
+         AND ((academic_year_id = ? AND academic_term_id = ?)
+           OR (academic_year_id IS NULL AND academic_term_id IS NULL))
+       LIMIT 1 FOR UPDATE`,
+      [sectionId, schoolId, student.gradeLevel, period.academicYearId, period.termId]
+    )
+    if (!section) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Student or target section is not available in the active academic period.' })
+    }
+    if (Number(student.sectionId) === Number(section.id)) {
+      await connection.rollback()
+      return res.status(400).json({ message: 'Choose a different section for the transfer.' })
+    }
+    const [[count]] = await connection.execute(
+      `SELECT COUNT(*) AS total FROM students WHERE school_id = ? AND section_id = ?
+       AND status = 'Active' AND ${confirmedEnrollmentSql} AND enrollment_year_id = ?`,
+      [schoolId, section.id, period.academicYearId]
+    )
+    if (Number(count.total) >= Number(capacity)) {
+      await connection.rollback()
+      return res.status(409).json({ message: 'The target section has no available seats.' })
+    }
+    await connection.execute(
+      `UPDATE students SET section_id = ?, section = ? WHERE id = ? AND school_id = ?`,
+      [section.id, section.sectionName, student.id, schoolId]
+    )
+    await connection.execute(
+      `UPDATE student_records SET section = ? WHERE user_id = ?`,
+      [section.sectionName, student.userId]
+    )
+    await connection.commit()
+    return res.json({
+      message: 'Student transferred successfully.',
+      studentId: Number(student.userId),
+      sectionId: Number(section.id),
+      sectionName: section.sectionName,
+    })
+  } catch (error) {
+    if (connection) await connection.rollback()
+    return next(error)
+  } finally {
+    connection?.release()
+  }
+}
+
 export async function assignRegistrarSections(req, res, next) {
   const body = req.body ?? {}
   const grade = typeof body.grade === 'string' ? body.grade : ''
@@ -350,12 +617,12 @@ export async function assignRegistrarSections(req, res, next) {
     || new Set(studentIds.map(Number)).size !== studentIds.length)) {
     return res.status(400).json({ message: 'Select one or more valid, unique student records.' })
   }
-  const sortBy = body.sortBy || 'alphabetical'
-  if (mode === 'batch' && !['alphabetical', 'studentId', 'gender'].includes(sortBy)) {
-    return res.status(400).json({ message: 'Choose a capacity from 1 to 200 and a supported allocation order.' })
-  }
   if (mode === 'manual' && !validId(body.sectionId)) {
     return res.status(400).json({ message: 'Choose a valid target section.' })
+  }
+  const sortBy = body.sortBy || 'alphabetical'
+  if (mode === 'batch' && !['alphabetical', 'studentId', 'gender'].includes(sortBy)) {
+    return res.status(400).json({ message: 'Choose a supported automatic allocation order.' })
   }
 
   let connection
@@ -372,7 +639,7 @@ export async function assignRegistrarSections(req, res, next) {
     const period = await getCurrentAcademicPeriod(connection, schoolId)
     if (!period) {
       await connection.rollback()
-      return res.status(409).json({ message: 'Configure an active academic year before section allocation.' })
+      return res.status(409).json({ message: 'Configure an active academic year and current semester before section allocation.' })
     }
     const [sections] = await connection.execute(
       `SELECT id, section_name AS sectionName FROM school_sections
@@ -391,10 +658,12 @@ export async function assignRegistrarSections(req, res, next) {
               SUM(gender = 'Female') AS femaleCount, SUM(gender = 'Male') AS maleCount
        FROM students
        WHERE school_id = ? AND status = 'Active'
-         AND section_status = 'Confirmed / Enrolled'
-         AND enrollment_year_id = ? AND section_id IS NOT NULL
+         AND ${confirmedEnrollmentSql}
+         AND (enrollment_year_id = ?
+           OR (enrollment_year_id IS NULL AND academic_year = ?))
+         AND section_id IS NOT NULL
        GROUP BY section_id`,
-      [schoolId, period.academicYearId]
+      [schoolId, period.academicYearId, period.academicYear]
     )
     const countBySection = new Map(existingCounts.map((row) => [Number(row.sectionId), {
       total: Number(row.studentCount),
@@ -403,14 +672,18 @@ export async function assignRegistrarSections(req, res, next) {
     }]))
 
     const [students] = await connection.execute(
-      `SELECT id, user_id AS userId, full_name AS name, gender
-       FROM students
-      WHERE school_id = ? AND status = 'Unassigned'
-        AND section_status = 'Confirmed / Enrolled'
-        AND enrollment_year_id = ? AND section_id IS NULL
-        AND COALESCE(grade, grade_level) = ?
-      ORDER BY full_name, user_id FOR UPDATE`,
-      [schoolId, period.academicYearId, grade]
+      `SELECT student.id, student.user_id AS userId,
+             account.student_number AS studentNumber, student.full_name AS name, student.gender
+      FROM students student
+      JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
+      WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
+       AND LOWER(TRIM(student.section_status)) IN ('confirmed / enrolled', 'confirmed', 'enrolled')
+       AND (student.enrollment_year_id = ?
+         OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
+       AND student.section_id IS NULL
+       AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?
+      ORDER BY student.full_name, student.user_id FOR UPDATE`,
+      [schoolId, period.academicYearId, period.academicYear, grade]
     )
     const byId = new Map(students.map((student) => [Number(student.id), student]))
     let assignments = []
@@ -429,9 +702,10 @@ export async function assignRegistrarSections(req, res, next) {
       }
       const [[count]] = await connection.execute(
         `SELECT COUNT(*) AS total FROM students
-         WHERE school_id = ? AND status = 'Active' AND section_id = ? AND enrollment_year_id = ?
-           AND section_status = 'Confirmed / Enrolled'`,
-        [schoolId, targetSection.id, period.academicYearId]
+         WHERE school_id = ? AND status = 'Active' AND section_id = ?
+           AND (enrollment_year_id = ? OR (enrollment_year_id IS NULL AND academic_year = ?))
+           AND ${confirmedEnrollmentSql}`,
+        [schoolId, targetSection.id, period.academicYearId, period.academicYear]
       )
       if (Number(count.total) + selectedStudents.length > capacity) {
         await connection.rollback()
@@ -451,8 +725,9 @@ export async function assignRegistrarSections(req, res, next) {
         const [existingSectionNames] = await connection.execute(
           `SELECT section_name AS sectionName FROM school_sections
           WHERE school_id = ? AND grade_level = ?
-            AND (academic_year_id = ? OR academic_year_id IS NULL) FOR UPDATE`,
-          [schoolId, grade, period.academicYearId]
+            AND ((academic_year_id = ? AND academic_term_id = ?)
+              OR (academic_year_id IS NULL AND academic_term_id IS NULL)) FOR UPDATE`,
+          [schoolId, grade, period.academicYearId, period.termId]
         )
         const usedNames = new Set(existingSectionNames.map(({ sectionName }) => sectionName.toLowerCase()))
         let suffixIndex = 0
@@ -474,40 +749,12 @@ export async function assignRegistrarSections(req, res, next) {
           created += 1
         }
       }
-      let ordered = [...students]
-      if (sortBy === 'studentId') {
-        ordered.sort((a, b) => Number(a.userId) - Number(b.userId))
-      } else if (sortBy === 'gender') {
-        const female = ordered.filter((student) => student.gender === 'Female')
-        const male = ordered.filter((student) => student.gender === 'Male')
-        const unknown = ordered.filter((student) => !['Female', 'Male'].includes(student.gender))
-        ordered = []
-        for (let femaleIndex = 0, maleIndex = 0; femaleIndex < female.length || maleIndex < male.length;) {
-          if (femaleIndex < female.length) ordered.push(female[femaleIndex++])
-          if (maleIndex < male.length) ordered.push(male[maleIndex++])
-        }
-        ordered.push(...unknown)
-      }
-      const genderCounts = new Map(activeSections.map((section) => [
-        Number(section.id), {
-          Female: countBySection.get(Number(section.id))?.Female || 0,
-          Male: countBySection.get(Number(section.id))?.Male || 0,
-        },
-      ]))
+      activeSections.sort((a, b) => compareSectionNames(a.sectionName, b.sectionName))
+      const ordered = sortAllocationStudents(students, sortBy)
       for (const student of ordered) {
-        const available = activeSections.filter((section) => section.assigned < capacity)
-        const section = sortBy === 'gender'
-          ? available.sort((a, b) => (
-            (genderCounts.get(Number(a.id))[student.gender] || 0)
-              - (genderCounts.get(Number(b.id))[student.gender] || 0)
-            || a.assigned - b.assigned
-            || a.sectionName.localeCompare(b.sectionName)
-          ))[0]
-          : available.sort((a, b) => (
-            a.assigned - b.assigned || a.sectionName.localeCompare(b.sectionName)
-          ))[0]
+        const section = activeSections.find((item) => item.assigned < capacity)
+        if (!section) break
         section.assigned += 1
-        if (['Female', 'Male'].includes(student.gender)) genderCounts.get(Number(section.id))[student.gender] += 1
         assignments.push({ student, section })
       }
     }
@@ -526,9 +773,10 @@ export async function assignRegistrarSections(req, res, next) {
       const userPlaceholders = studentUserIds.map(() => '?').join(', ')
       const [updated] = await connection.execute(
         `UPDATE students SET section_id = ?, section = ?, status = 'Active'
-         WHERE id IN (${studentPlaceholders}) AND school_id = ? AND status = 'Unassigned' AND section_id IS NULL
-           AND section_status = 'Confirmed / Enrolled' AND enrollment_year_id = ?`,
-        [sectionId, section.sectionName, ...studentIdsForSection, schoolId, period.academicYearId]
+         WHERE id IN (${studentPlaceholders}) AND school_id = ? AND status IN ('Unassigned', 'Active') AND section_id IS NULL
+           AND ${confirmedEnrollmentSql}
+           AND (enrollment_year_id = ? OR (enrollment_year_id IS NULL AND academic_year = ?))`,
+        [sectionId, section.sectionName, ...studentIdsForSection, schoolId, period.academicYearId, period.academicYear]
       )
       if (Number(updated.affectedRows) !== studentIdsForSection.length) {
         await connection.rollback()
@@ -780,7 +1028,21 @@ export async function getAcademicOptions(req, res, next) {
   try {
     const schoolId = await getAccountSchoolId(req.user.id)
     if (!schoolId) return res.status(403).json({ message: 'Your account is not assigned to a school.' })
-    res.json(await getConfiguredAcademicOptions(pool, schoolId))
+    const options = await getConfiguredAcademicOptions(pool, schoolId)
+    const activePeriod = await getCurrentAcademicPeriod(pool, schoolId)
+    if (activePeriod) {
+      const [sections] = await pool.execute(
+        `SELECT grade_level AS gradeLevel, section_name AS sectionName
+         FROM school_sections
+         WHERE school_id = ? AND is_active = TRUE
+           AND ((? IS NOT NULL AND academic_year_id = ? AND academic_term_id = ?)
+             OR (academic_year_id IS NULL AND academic_term_id IS NULL))
+         ORDER BY grade_level, section_name`,
+        [schoolId, activePeriod.termId, activePeriod.academicYearId, activePeriod.termId]
+      )
+      options.sections = sections
+    }
+    return res.json(options)
   } catch (error) { next(error) }
 }
 
@@ -817,12 +1079,12 @@ export async function registerStudent(req, res, next) {
     'previousSchool', 'guardianName', 'guardianRelation', 'relationship', 'guardianPhone',
     'guardianEmail', 'emergencyContactName', 'emergencyContactPhone', 'emergencyContact',
     'region', 'zone', 'woreda', 'kebele', 'houseNo', 'address', 'grade', 'className',
-    'section', 'academicYear', 'registrationDate', 'password',
+    'section', 'academicYear', 'registrationDate',
   ]
   const values = Object.fromEntries(fields.map((field) => [
     field,
     typeof body[field] === 'string'
-      ? field === 'password' ? body[field] : body[field].trim()
+      ? body[field].trim()
       : '',
   ]))
   const fullName = values.fullName || [values.firstName, values.lastName].filter(Boolean).join(' ')
@@ -838,11 +1100,11 @@ export async function registerStudent(req, res, next) {
     values.emergencyContactName, emergencyContactPhone,
     values.region, values.zone, values.woreda, values.kebele,
     grade, ...(req.user.role === 'Registrar' ? [] : [values.section]),
-    values.academicYear, registrationDate, values.password,
+    values.academicYear, registrationDate,
   ]
   if (requiredFields.some((field) => !field)) {
     await cleanupUploadedPhotos()
-    return res.status(400).json({ message: 'Complete all required student and login fields.' })
+    return res.status(400).json({ message: 'Complete all required student details.' })
   }
   const maximumLengths = {
     email: 100, phoneNumber: 40, previousSchool: 200, guardianName: 150,
@@ -864,23 +1126,6 @@ export async function registerStudent(req, res, next) {
     || (values.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.guardianEmail))) {
     await cleanupUploadedPhotos()
     return res.status(400).json({ message: 'Enter valid student and guardian email addresses.' })
-  }
-  let policies
-  try {
-    ;[policies] = await pool.execute(
-      'SELECT min_password_length, require_password_mixed_case, require_password_number FROM system_security_policy WHERE id = 1'
-    )
-  } catch (error) {
-    await cleanupUploadedPhotos()
-    return next(error)
-  }
-  const policy = policies[0] ?? { min_password_length: 8, require_password_mixed_case: false, require_password_number: false }
-  const passwordValid = values.password.length >= policy.min_password_length && values.password.length <= 72
-    && (!policy.require_password_mixed_case || (/[a-z]/.test(values.password) && /[A-Z]/.test(values.password)))
-    && (!policy.require_password_number || /\d/.test(values.password))
-  if (!passwordValid) {
-    await cleanupUploadedPhotos()
-    return res.status(400).json({ message: `Student password must be at least ${policy.min_password_length} characters and meet the configured security policy.` })
   }
   let academicOptions
   let schoolId
@@ -922,13 +1167,14 @@ export async function registerStudent(req, res, next) {
       : await getActiveSectionId(connection, schoolId, grade, values.section)
     const sectionName = sectionId ? values.section : null
     const studentStatus = sectionId ? 'Active' : 'Unassigned'
+    const academicStatus = grade === 'Grade 9' ? 'Active' : 'Enrolled'
     const sectionStatus = sectionId && !requiresCheckIn ? 'Confirmed / Enrolled' : 'Pending Check-In'
-    const passwordHash = await bcrypt.hash(values.password, 10)
+    const passwordHash = await bcrypt.hash(DEFAULT_TEMPORARY_PASSWORD, 10)
     const loginEmail = `student_${randomUUID().replaceAll('-', '')}@school.local`
     const [result] = await connection.execute(
       `INSERT INTO users
-        (full_name, email, password, role, grade_level, registration_source, registered_by, school_id)
-             VALUES (?, ?, ?, 'Student', ?, ?, ?, ?)`,
+        (full_name, email, password, role, grade_level, registration_source, registered_by, school_id, must_change_password)
+             VALUES (?, ?, ?, 'Student', ?, ?, ?, ?, TRUE)`,
       [
         fullName,
         loginEmail,
@@ -982,7 +1228,7 @@ export async function registerStudent(req, res, next) {
         values.academicYear,
         registrationDate,
         studentStatus,
-        'Enrolled',
+        academicStatus,
         sectionStatus,
         period?.academicYearId ?? null,
       ]
@@ -1053,7 +1299,6 @@ const bulkTemplateFields = [
   { header: 'Emergency Contact Phone', key: 'emergency_contact_phone', width: 28 },
   { header: 'Registration Date (YYYY-MM-DD)', key: 'registration_date', width: 30 },
   { header: 'Academic Year', key: 'academic_year', width: 18 },
-  { header: 'Temporary Password', key: 'temporary_password', width: 24 },
 ]
 
 const bulkHeaderAliases = {
@@ -1067,7 +1312,6 @@ const bulkHeaderAliases = {
   parent_phone: 'guardian_phone',
   emergency_name: 'emergency_contact_name',
   emergency_phone: 'emergency_contact_phone',
-  password: 'temporary_password',
 }
 
 function normalizeBulkHeader(value) {
@@ -1105,7 +1349,7 @@ export async function downloadStudentImportTemplate(_req, res, next) {
       width,
       style: ['dob', 'registration_date'].includes(key)
         ? { numFmt: 'yyyy-mm-dd' }
-        : ['house_no', 'phone_number', 'email', 'guardian_phone', 'guardian_email', 'emergency_contact_phone', 'temporary_password'].includes(key)
+        : ['house_no', 'phone_number', 'email', 'guardian_phone', 'guardian_email', 'emergency_contact_phone'].includes(key)
           ? { numFmt: '@' }
           : undefined,
     }))
@@ -1148,7 +1392,7 @@ export async function bulkImportStudents(req, res, next) {
     const requiredHeaders = [
       'full_name', 'dob', 'gender', 'grade', 'previous_school', 'region', 'zone',
       'woreda', 'kebele', 'phone_number', 'guardian_name', 'guardian_relation', 'guardian_phone',
-      'emergency_contact_name', 'emergency_contact_phone', 'academic_year', 'temporary_password',
+      'emergency_contact_name', 'emergency_contact_phone', 'academic_year',
     ]
     const missingHeaders = requiredHeaders.filter((header) => !headerIndexes.has(header))
     if (missingHeaders.length) {
@@ -1157,10 +1401,6 @@ export async function bulkImportStudents(req, res, next) {
     const schoolId = await getAccountSchoolId(req.user.id)
     if (!schoolId) return res.status(403).json({ message: 'Your account is not assigned to a school.' })
     const academicOptions = await getConfiguredAcademicOptions(pool, schoolId)
-    const [policies] = await pool.execute(
-      'SELECT min_password_length, require_password_mixed_case, require_password_number FROM system_security_policy WHERE id = 1'
-    )
-    const policy = policies[0] ?? { min_password_length: 8, require_password_mixed_case: false, require_password_number: false }
     const rowResults = []
     let inserted = 0
 
@@ -1196,12 +1436,6 @@ export async function bulkImportStudents(req, res, next) {
       if (!raw.emergency_contact_name || raw.emergency_contact_name.length > 150) errors.push('Emergency Contact Name is required and must be at most 150 characters.')
       if (!/^\d{7,40}$/.test(raw.emergency_contact_phone.replace(/\D/g, ''))) errors.push('Emergency Contact Phone must contain at least 7 digits.')
       if (!validDate(registrationDate)) errors.push('Registration Date must use YYYY-MM-DD and be a valid date.')
-      const password = raw.temporary_password
-      if (password.length < policy.min_password_length || password.length > 72
-        || (policy.require_password_mixed_case && !(/[a-z]/.test(password) && /[A-Z]/.test(password)))
-        || (policy.require_password_number && !/\d/.test(password))) {
-        errors.push(`Temporary Password must be at least ${policy.min_password_length} characters and meet the school security policy.`)
-      }
       if (address.length > 1000) errors.push('Combined address is too long.')
       if (errors.length) {
         rowResults.push({ row: rowNumber, status: 'skipped', message: errors.join(' ') })
@@ -1221,13 +1455,14 @@ export async function bulkImportStudents(req, res, next) {
         const sectionStatus = sectionId && req.user.role !== 'Registrar'
           ? 'Confirmed / Enrolled'
           : 'Pending Check-In'
-        const passwordHash = await bcrypt.hash(password, 10)
+        const academicStatus = raw.grade === 'Grade 9' ? 'Active' : 'Enrolled'
+        const passwordHash = await bcrypt.hash(DEFAULT_TEMPORARY_PASSWORD, 10)
         const loginEmail = `student_${randomUUID().replaceAll('-', '')}@school.local`
         const fullName = raw.full_name
         const [userResult] = await connection.execute(
           `INSERT INTO users
-            (full_name, email, password, role, grade_level, registration_source, registered_by, school_id)
-           VALUES (?, ?, ?, 'Student', ?, ?, ?, ?)`,
+            (full_name, email, password, role, grade_level, registration_source, registered_by, school_id, must_change_password)
+           VALUES (?, ?, ?, 'Student', ?, ?, ?, ?, TRUE)`,
           [fullName, loginEmail, passwordHash, raw.grade, req.user.role === 'Registrar' ? 'registrar' : 'admin', req.user.id, schoolId]
         )
         await connection.execute(
@@ -1245,7 +1480,7 @@ export async function bulkImportStudents(req, res, next) {
             raw.guardian_relation, raw.guardian_relation, raw.guardian_phone, raw.guardian_email || null,
             raw.emergency_contact_name, raw.emergency_contact_phone, raw.emergency_contact_phone,
             address, null, null, raw.academic_year, registrationDate, studentStatus,
-            'Enrolled', sectionStatus, period?.academicYearId ?? null]
+            academicStatus, sectionStatus, period?.academicYearId ?? null]
         )
         await connection.execute(
           `INSERT INTO student_records (
@@ -1301,7 +1536,7 @@ export async function getWorkspaceAcademicPeriod(req, res, next) {
       `SELECT year.name AS academicYear, term.name AS semester
        FROM academic_years year
        LEFT JOIN academic_terms term ON term.academic_year_id = year.id
-         AND term.school_id = year.school_id AND term.is_active = TRUE
+         AND term.school_id = year.school_id AND term.is_current = TRUE
        WHERE year.school_id = ? AND year.is_active = TRUE
        ORDER BY year.start_date DESC, term.start_date DESC LIMIT 1`,
       [schoolId]

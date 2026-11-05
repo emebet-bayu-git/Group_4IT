@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assignRegistrarSections, bulkImportStudents, checkInRegistrarStudent, deleteStudent, downloadStudentImportTemplate, getAcademicOptions, getHomeImages, getPublicSchoolProfile, getRegistrarSectionAllocation, getStudent, getStudentProfile, getWorkspaceAcademicPeriod, listRegistrarReEnrollment, listStudents, registerStudent, updateStudent, uploadHomeImage } from '../controllers/dashboardController.js'
+import { assignRegistrarSections, bulkImportStudents, checkInRegistrarStudent, deleteStudent, downloadStudentImportTemplate, getAcademicOptions, getHomeImages, getPublicSchoolProfile, getRegistrarSectionAllocation, getStudent, getStudentProfile, getWorkspaceAcademicPeriod, listRegistrarReEnrollment, listStudents, previewRegistrarSections, registerStudent, transferRegistrarStudent, updateStudent, uploadHomeImage } from '../controllers/dashboardController.js'
 import {
   deleteTeacherClassGrade,
   approveLeadershipSectionSubmission,
@@ -62,7 +62,9 @@ router.get('/student/report-card', authenticateUser, authorizeRoles('Student'), 
 router.get('/student/academic-records', authenticateUser, authorizeRoles('Student'), getMyPermanentAcademicRecords)
 router.get('/registrar/academic-records/:studentId', authenticateUser, authorizeRoles('Registrar'), getRegistrarStudentAcademicRecords)
 router.get('/registrar/section-allocation', authenticateUser, authorizeRoles('Registrar'), getRegistrarSectionAllocation)
+router.post('/registrar/section-allocation/preview', authenticateUser, authorizeRoles('Registrar'), previewRegistrarSections)
 router.post('/registrar/assign-sections', authenticateUser, authorizeRoles('Registrar'), assignRegistrarSections)
+router.post('/registrar/section-allocation/:studentId/transfer', authenticateUser, authorizeRoles('Registrar'), transferRegistrarStudent)
 router.get('/registrar/re-enrollment', authenticateUser, authorizeRoles('Registrar'), listRegistrarReEnrollment)
 router.post('/registrar/re-enrollment/:id/check-in', authenticateUser, authorizeRoles('Registrar'), checkInRegistrarStudent)
 router.get('/teacher/advisor/sections', authenticateUser, authorizeRoles('Teacher'), listTeacherAdvisorSections)
