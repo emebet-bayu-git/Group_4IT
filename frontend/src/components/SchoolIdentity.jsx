@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { GraduationCap } from 'lucide-react'
+import { useTranslation } from '../i18n/I18nContext.jsx'
 
 export function useSchoolProfile() {
   const [school, setSchool] = useState({})
@@ -21,6 +22,11 @@ export function SchoolMark({ school, className = 'h-16 w-16' }) {
 }
 
 export function SchoolAddress({ school }) {
-  const address = [school.region, school.wereda].filter(Boolean).join(' · ')
-  return address
+  const { t } = useTranslation()
+  const address = [
+    ['Region', school.region],
+    ['Zone', school.zone],
+    ['Woreda', school.wereda],
+  ].filter(([, value]) => value)
+  return address.map(([label, value], index) => <span key={label}>{index > 0 ? ' · ' : ''}{t(label)}: {value}</span>)
 }

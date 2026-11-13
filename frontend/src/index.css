@@ -27,8 +27,10 @@
 @media print {
   @page { size: A4; margin: 12mm; }
   body { background: white !important; }
-  aside, header, nav, .report-actions { display: none !important; }
+  aside, nav, .dashboard-topbar, .dashboard-welcome, .app-footer, .report-actions, .transcript-actions, .report-online-only { display: none !important; }
+  .report-document header, .transcript-document header { display: flex !important; }
   main, main > div { margin: 0 !important; padding: 0 !important; max-width: none !important; }
-  .report-document { box-shadow: none !important; padding: 0 !important; }
+  .report-document, .transcript-document { box-shadow: none !important; padding: 0 !important; }
+  .transcript-document article > button { display: none !important; }
   * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }

@@ -15,10 +15,11 @@ import GradeEntryView from '../components/GradeEntryView.jsx'
 import TranscriptView from '../components/TranscriptView.jsx'
 import AdvisorAggregationView from '../components/AdvisorAggregationView.jsx'
 import RegistrarResultsView from '../components/RegistrarResultsView.jsx'
+import RegistrarDashboard from '../components/RegistrarDashboard.jsx'
 import LeadershipResultsView from '../components/LeadershipResultsView.jsx'
 import SectionAllocationView from '../components/SectionAllocationView.jsx'
 import ReEnrollmentView from '../components/ReEnrollmentView.jsx'
-import TeacherWorkloadView from '../components/TeacherWorkloadView.jsx'
+import AcademicVicePrincipalWorkspace from '../components/AcademicVicePrincipalWorkspace.jsx'
 import RegisterStaffView from '../components/RegisterStaffView.jsx'
 import { readSessionToken } from './LoginPage.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
@@ -49,8 +50,10 @@ const taskDetails = {
     'leadership-results': ['Review Class Results', 'Review class results submitted by homeroom advisors and approve them with the official stamp.'],
   },
   'Vice Principal': {
-    overview: ['Leadership Overview', 'Review your school leadership responsibilities.'],
-    'teacher-workload': ['Teacher Workload & Section Assignment', 'Assign teachers to subjects, grade sections, and an optional homeroom advisor role.'],
+    overview: ['Academic Overview', 'Review section coverage, curriculum assignment gaps, homeroom allocation, and teacher period loads.'],
+    'teacher-assignments': ['Teacher Section & Subject Assignment', 'Assign qualified teachers to required curriculum subjects in each active section.'],
+    'homeroom-management': ['Homeroom Teacher Management', 'Assign an eligible homeroom teacher to each section for the active academic year.'],
+    'teacher-workloads': ['Teacher Workload & Schedule Overview', 'Review weekly teacher loads and section subject assignments.'],
     'leadership-results': ['Review Class Results', 'Review class results submitted by homeroom advisors and approve them with the official stamp.'],
   },
   Supervisor: {
@@ -118,7 +121,7 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
   }
   const roleTasks = role === 'Teacher'
     ? [...dashboardMenuByRole.Teacher, ...(advisorSections.length
-      ? [{ id: 'advisor-results', label: 'Class Result Aggregation & Submission' }]
+      ? [{ id: 'advisor-results', label: 'My Homeroom' }]
       : [])]
     : dashboardMenuByRole[role] ?? []
   const initialTask = roleTasks[0]?.id || 'overview'
@@ -249,6 +252,8 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
     }
   } else if (role === 'Registrar') {
     if (currentTask === 'overview') {
+      content = <RegistrarDashboard onNavigate={navigateTask} />
+    } else if (currentTask === 'student-records') {
       content = <StudentList onRegisterStudent={saveStudent} onAction={(action, student) => window.alert(`${action}: ${student.name}`)} />
     } else if (currentTask === 're-enrollment') {
       content = <ReEnrollmentView />
@@ -286,8 +291,8 @@ export default function DashboardPage({ user, onLogout, onUserUpdated }) {
     } else if (currentTask === 'transcript') {
       content = <TranscriptView onBack={() => navigateTask('overview')} />
     }
-  } else if (role === 'Vice Principal' && currentTask === 'teacher-workload') {
-    content = <TeacherWorkloadView />
+  } else if (role === 'Vice Principal' && ['overview', 'teacher-assignments', 'homeroom-management', 'teacher-workloads'].includes(currentTask)) {
+    content = <AcademicVicePrincipalWorkspace view={currentTask} />
   } else if (['Headmaster', 'Vice Principal'].includes(role) && currentTask === 'leadership-results') {
     content = <LeadershipResultsView />
   }

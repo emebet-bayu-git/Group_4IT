@@ -15,6 +15,7 @@ import {
   getRegistrarSectionSubmission,
   getTeacherAdvisorSectionResults,
   getTeacherClassGrades,
+  markRegistrarStudentTransferredOut,
   listRegistrarSectionSubmissions,
   listLeadershipSectionSubmissions,
   listTeacherAdvisorSections,
@@ -24,7 +25,13 @@ import {
   submitTeacherAdvisorSectionResults,
 } from '../controllers/teacherController.js'
 import { authenticateUser, authorizeRoles, requireSchoolAdmin } from '../middleware/authMiddleware.js'
-import { getVicePrincipalWorkload, saveVicePrincipalWorkload } from '../controllers/workloadController.js'
+import {
+  getAcademicVicePrincipalWorkspace,
+  initializeAcademicCurriculum,
+  saveAcademicCurriculumSubject,
+  saveAcademicHomeroomTeacher,
+  saveAcademicSubjectTeacher,
+} from '../controllers/academicVicePrincipalController.js'
 
 const router = Router()
 const directory = path.dirname(fileURLToPath(import.meta.url))
@@ -53,14 +60,18 @@ router.get('/workspace-academic-period', authenticateUser, getWorkspaceAcademicP
 router.get('/academic-options', authenticateUser, authorizeRoles('Registrar'), getAcademicOptions)
 router.get('/students/me', authenticateUser, getStudentProfile)
 router.get('/teacher/classes', authenticateUser, authorizeRoles('Teacher'), listTeacherClasses)
-router.get('/vice-principal/workload', authenticateUser, authorizeRoles('Vice Principal'), getVicePrincipalWorkload)
-router.put('/vice-principal/workload/:teacherId', authenticateUser, authorizeRoles('Vice Principal'), saveVicePrincipalWorkload)
+router.get('/vice-principal/academic-workspace', authenticateUser, authorizeRoles('Vice Principal'), getAcademicVicePrincipalWorkspace)
+router.post('/vice-principal/curriculum', authenticateUser, authorizeRoles('Vice Principal'), saveAcademicCurriculumSubject)
+router.post('/vice-principal/curriculum/initialize', authenticateUser, authorizeRoles('Vice Principal'), initializeAcademicCurriculum)
+router.put('/vice-principal/sections/:sectionId/subjects/:subjectId', authenticateUser, authorizeRoles('Vice Principal'), saveAcademicSubjectTeacher)
+router.put('/vice-principal/sections/:sectionId/homeroom', authenticateUser, authorizeRoles('Vice Principal'), saveAcademicHomeroomTeacher)
 router.get('/leadership/section-results', authenticateUser, authorizeRoles('Headmaster', 'Vice Principal'), listLeadershipSectionSubmissions)
 router.get('/leadership/section-results/:id', authenticateUser, authorizeRoles('Headmaster', 'Vice Principal'), getLeadershipSectionSubmission)
 router.post('/leadership/section-results/:id/approve', authenticateUser, authorizeRoles('Headmaster', 'Vice Principal'), approveLeadershipSectionSubmission)
 router.get('/student/report-card', authenticateUser, authorizeRoles('Student'), getStudentApprovedReportCard)
 router.get('/student/academic-records', authenticateUser, authorizeRoles('Student'), getMyPermanentAcademicRecords)
 router.get('/registrar/academic-records/:studentId', authenticateUser, authorizeRoles('Registrar'), getRegistrarStudentAcademicRecords)
+router.post('/registrar/students/:studentId/transfer-out', authenticateUser, authorizeRoles('Registrar'), markRegistrarStudentTransferredOut)
 router.get('/registrar/section-allocation', authenticateUser, authorizeRoles('Registrar'), getRegistrarSectionAllocation)
 router.post('/registrar/section-allocation/preview', authenticateUser, authorizeRoles('Registrar'), previewRegistrarSections)
 router.post('/registrar/assign-sections', authenticateUser, authorizeRoles('Registrar'), assignRegistrarSections)

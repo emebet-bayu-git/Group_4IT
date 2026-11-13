@@ -144,7 +144,8 @@ export async function updateAcademicSectionAdvisor(req, res, next) {
     const schoolId = await requireSchoolId(req, res)
     if (!schoolId) return
     const [[section]] = await pool.execute(
-      `SELECT id, academic_year_id AS academicYearId, academic_term_id AS academicTermId
+      `SELECT id, grade_level AS gradeLevel, section_name AS sectionName,
+              academic_year_id AS academicYearId
        FROM school_sections WHERE id = ? AND school_id = ? LIMIT 1`,
       [req.params.id, schoolId]
     )
@@ -159,19 +160,41 @@ export async function updateAcademicSectionAdvisor(req, res, next) {
     }
     connection = await pool.getConnection()
     await connection.beginTransaction()
+    let academicYearId = section.academicYearId
+    if (!academicYearId && teacherId !== null) {
+      const [[activeYear]] = await connection.execute(
+        'SELECT id FROM academic_years WHERE school_id = ? AND is_active = TRUE ORDER BY start_date DESC LIMIT 1',
+        [schoolId]
+      )
+      academicYearId = activeYear?.id ?? null
+    }
     if (teacherId !== null) {
       await connection.execute(
-        `UPDATE school_sections
-         SET homeroom_teacher_id = NULL
-         WHERE school_id = ? AND homeroom_teacher_id = ? AND id <> ?
-           AND ((academic_year_id = ? AND academic_term_id = ?)
-             OR (academic_year_id IS NULL AND academic_term_id IS NULL))`,
-        [schoolId, teacherId, req.params.id, section.academicYearId, section.academicTermId]
+        'SELECT id FROM users WHERE id = ? AND school_id = ? FOR UPDATE',
+        [teacherId, schoolId]
       )
+      if (academicYearId) {
+        const [[occupied]] = await connection.execute(
+          `SELECT id FROM school_sections
+           WHERE school_id = ? AND homeroom_teacher_id = ? AND id <> ?
+             AND (academic_year_id = ? OR academic_year_id IS NULL)
+             AND NOT (grade_level = ? AND section_name = ?)
+           LIMIT 1`,
+          [schoolId, teacherId, req.params.id, academicYearId, section.gradeLevel, section.sectionName]
+        )
+        if (occupied) {
+          await connection.rollback()
+          return res.status(409).json({ message: 'This teacher is already the homeroom teacher for another section in the active academic year.' })
+        }
+      }
     }
     await connection.execute(
-      'UPDATE school_sections SET homeroom_teacher_id = ? WHERE id = ? AND school_id = ?',
-      [teacherId, req.params.id, schoolId]
+      `UPDATE school_sections SET homeroom_teacher_id = ?
+       WHERE school_id = ? AND grade_level = ? AND section_name = ?
+         AND ((? IS NOT NULL AND academic_year_id = ?)
+           OR (? IS NULL AND academic_year_id IS NULL))`,
+      [teacherId, schoolId, section.gradeLevel, section.sectionName,
+        section.academicYearId, academicYearId, section.academicYearId]
     )
     await connection.commit()
     return res.json(await getAcademicSection(pool, req.params.id, schoolId))

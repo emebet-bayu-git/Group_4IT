@@ -154,7 +154,7 @@ export default function GradeEntryView({ initialAssignmentId, readOnly = false }
   return (
     <section className="space-y-5" aria-labelledby="grade-entry-heading">
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <div><p className="text-sm font-semibold text-primary-700">{t('Teacher workspace')}</p><h1 id="grade-entry-heading" className="mt-1 text-2xl font-bold text-slate-900">{t(readOnly ? 'Student Roster' : 'Grade Entry')}</h1><p className="mt-1 text-sm text-slate-500">{period ? `${t(period.semester)} · ${period.academicYear}` : t('No active academic semester')}</p></div>
+        <div><p className="text-sm font-semibold text-primary-700">{t('Teacher workspace')}</p><h1 id="grade-entry-heading" className="mt-1 text-2xl font-bold text-slate-900">{t(readOnly ? 'Student Roster' : 'Grade Entry')}</h1><p className="mt-1 text-sm text-slate-500">{period ? `${t(period.semester)} · ${period.academicYear}` : t('No active academic semester')}</p>{classInfo && <p className="mt-1 text-sm text-slate-600">{t('Homeroom Teacher')}: {classInfo.homeroomTeacherName || t('Unassigned')}</p>}</div>
         <label className="block min-w-56 text-sm font-medium text-slate-700">{t('Assigned class')}
           <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} disabled={loadingClasses || !classes.length || saving || Boolean(rowBusy)} className="mt-1 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100">
             {!classes.length && <option value="">{t('No assigned classes')}</option>}

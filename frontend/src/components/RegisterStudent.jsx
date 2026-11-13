@@ -153,6 +153,7 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
   }, [data.parentPhoto])
   const isValid = (field) => {
     const value = data[field]?.trim?.() ?? data[field]
+    if (field === 'section') return !value || academicOptions.sections.some((section) => section.gradeLevel === data.grade && section.sectionName === value)
     if (field === 'houseNo') return !value || value.length <= 40
     if (field === 'email') return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
     if (field === 'guardianEmail') return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
@@ -162,7 +163,7 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
   const required = {
     0: ['fullName', 'dob', 'gender', 'phoneNumber', 'previousSchool'],
     1: ['region', 'zone', 'woreda', 'kebele', 'guardianName', 'guardianRelation', 'guardianPhone', 'emergencyContactName', 'emergencyContactPhone'],
-    2: ['grade', ...(!allowUnassigned || student ? ['section'] : []), 'academicYear', 'registrationDate'],
+    2: ['grade', 'academicYear', 'registrationDate'],
   }
   const hasError = (field) => touched[field] && !isValid(field)
   const stepValid = () => required[step].every((field) => isValid(field))
@@ -242,13 +243,13 @@ export default function RegisterStudent({ onCancel, onComplete, student = null, 
             ? <div className="rounded-md border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
               {t('Section assignment is locked until the Registrar completes student check-in.')}
             </div>
-            : <Field {...fieldProps} name="section" label="Section" options={academicOptions.sections.filter((item) => item.gradeLevel === data.grade).map((item) => item.sectionName)} />}
+            : <Field {...fieldProps} name="section" label="Section" requiredField={false} emptyOption="Unassigned — assign a section later" options={academicOptions.sections.filter((item) => item.gradeLevel === data.grade).map((item) => item.sectionName)} />}
           <Field {...fieldProps} name="academicYear" label="Academic year" options={academicOptions.years} emptyOption={academicOptions.years.length ? undefined : 'No academic years configured'} />
           {activeAcademicPeriod?.semester && <p className="text-sm text-slate-600 sm:col-span-2">
             {t('Current academic period')}: {activeAcademicPeriod.academicYear} · {activeAcademicPeriod.semester}
           </p>}
           <Field {...fieldProps} name="registrationDate" label="Registration date" type="date" />
-          <div className="rounded-md border border-primary-100 bg-primary-50 p-4 sm:col-span-2"><p className="text-sm font-semibold text-primary-900">{t('Registration summary')}</p><p className="mt-1 text-sm text-primary-700">{data.fullName || t('Student')} will be assigned to {data.grade || t('a grade')} · {data.section || (allowUnassigned ? t('Unassigned — assign a section later') : t('a section'))} for {data.academicYear}.</p></div>
+          <div className="rounded-md border border-primary-100 bg-primary-50 p-4 sm:col-span-2"><p className="text-sm font-semibold text-primary-900">{t('Registration summary')}</p><p className="mt-1 text-sm text-primary-700">{data.fullName || t('Student')} will be assigned to {data.grade || t('a grade')} · {data.section || t('Unassigned — assign a section later')} for {data.academicYear}.</p></div>
         </div>}
       </div><div className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><Button variant="secondary" disabled={saving} onClick={step === 0 ? onCancel : () => setStep((current) => current - 1)}><ChevronLeft className="h-4 w-4" />{step === 0 ? 'Cancel' : t('Previous')}</Button>{step < 2 ? <Button onClick={next}>{t('Continue')}<ChevronRight className="h-4 w-4" /></Button> : <Button variant="success" loading={saving} onClick={completeRegistration}><Check className="h-4 w-4" />{t('Complete registration')}</Button>}</div></section>
       </>}

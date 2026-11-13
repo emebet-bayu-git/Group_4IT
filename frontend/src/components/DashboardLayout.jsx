@@ -48,7 +48,8 @@ export const dashboardMenuByRole = {
     { id: 'system-access', label: 'System Administration', icon: Settings },
   ],
   Registrar: [
-    { id: 'overview', label: 'Student Records', icon: LayoutDashboard },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'student-records', label: 'Student Records', icon: Users },
     { id: 're-enrollment', label: 'Student Re-Enrollment / Check-In', icon: ClipboardCheck },
     { id: 'section-allocation', label: 'Student Section Allocation', icon: Users },
     { id: 'transcripts', label: 'Grade 9–12 Transcripts', icon: FileText },
@@ -60,8 +61,10 @@ export const dashboardMenuByRole = {
     { id: 'roster', label: 'Student Roster', icon: Users },
   ],
   'Vice Principal': [
-    { id: 'overview', label: 'Leadership Overview', icon: LayoutDashboard },
-    { id: 'teacher-workload', label: 'Teacher Workload & Section Assignment', icon: Users },
+    { id: 'overview', label: 'Academic Overview', icon: LayoutDashboard },
+    { id: 'teacher-assignments', label: 'Teacher Section & Subject Assignment', icon: BookOpen },
+    { id: 'homeroom-management', label: 'Homeroom Teacher Management', icon: Users },
+    { id: 'teacher-workloads', label: 'Teacher Workload & Schedule Overview', icon: CalendarDays },
     { id: 'leadership-results', label: 'Review Class Results', icon: ClipboardCheck },
   ],
   Headmaster: [
@@ -98,7 +101,7 @@ export default function DashboardLayout({
   const userName = user.name || user.identifier || role
   const canEditProfile = ['Super Admin', 'School Admin', 'Registrar', 'Teacher', 'Headmaster', 'Vice Principal', 'Supervisor'].includes(role)
   const items = role === 'Teacher' && advisorAvailable
-    ? [...dashboardMenuByRole.Teacher, { id: 'advisor-results', label: 'Class Result Aggregation & Submission', icon: ClipboardCheck }]
+    ? [...dashboardMenuByRole.Teacher, { id: 'advisor-results', label: 'My Homeroom', icon: ClipboardCheck }]
     : dashboardMenuByRole[role] ?? []
   const initials = userName
     .trim()
@@ -152,7 +155,7 @@ export default function DashboardLayout({
       <aside className={`fixed inset-y-0 left-0 z-40 hidden bg-primary-900 transition-[width] lg:block ${collapsed ? 'w-20' : 'w-64'}`}>{sidebar}</aside>
       {mobileOpen && <><button type="button" className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" onClick={() => setMobileOpen(false)} aria-label={t('Close navigation')} /><aside className="fixed inset-y-0 left-0 z-50 w-72 bg-primary-900 lg:hidden">{sidebar}</aside></>}
       <div className={`flex min-h-screen min-w-0 flex-1 flex-col transition-[margin] ${collapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 bg-emerald-700 px-4 text-white shadow-sm sm:px-6">
+        <header className="dashboard-topbar sticky top-0 z-30 flex h-16 items-center justify-between gap-3 bg-emerald-700 px-4 text-white shadow-sm sm:px-6">
           <div className="flex min-w-0 items-center gap-3"><button className="rounded-md p-2 text-emerald-50 hover:bg-emerald-800 lg:hidden" onClick={() => setMobileOpen(true)} aria-label={t('Open menu')}><Menu className="h-5 w-5" /></button><div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-white/10">{school.logo_path ? <img src={school.logo_path} alt="" className="h-full w-full object-contain" /> : <GraduationCap className="h-6 w-6" />}</div><div className="min-w-0"><p className="truncate text-sm font-bold sm:text-base">{schoolName}</p><p className="truncate text-xs text-emerald-100">{academicPeriodLoading ? t('Loading academic period…') : academicPeriodError ? t(academicPeriodError) : [activeAcademicPeriod?.academicYear, activeAcademicPeriod?.semester].filter(Boolean).map(t).join(' · ') || t('No active academic period')}</p></div></div>
           <div className="flex items-center gap-1 sm:gap-3">
             <button className="relative rounded-md p-2 text-emerald-50 hover:bg-emerald-800" aria-label={t('Notifications')}><Bell className="h-5 w-5" /><span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger-500 ring-2 ring-emerald-700" /></button>
@@ -161,7 +164,7 @@ export default function DashboardLayout({
             <button onClick={onLogout} className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold text-white hover:bg-emerald-800" aria-label={t('Log out')}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">{t('Logout')}</span></button>
           </div>
         </header>
-        <main className="scrollbar-subtle flex-1 overflow-y-auto"><div className="workspace-card-scope mx-auto w-full max-w-screen-2xl p-4 sm:p-6 lg:p-8"><div className="mb-6"><h1 className="text-2xl font-bold text-slate-900">{t('Welcome, {name}!', { name: userName })}</h1><p className="mt-1 text-sm text-slate-500">{role === 'Super Admin' ? t('SYSTEM ADMIN WORKSPACE') : t('{role} workspace', { role: t(role) })}</p></div>{children}</div></main>
+        <main className="scrollbar-subtle flex-1 overflow-y-auto"><div className="workspace-card-scope mx-auto w-full max-w-screen-2xl p-4 sm:p-6 lg:p-8"><div className="dashboard-welcome mb-6"><h1 className="text-2xl font-bold text-slate-900">{t('Welcome, {name}!', { name: userName })}</h1><p className="mt-1 text-sm text-slate-500">{role === 'Super Admin' ? t('SYSTEM ADMIN WORKSPACE') : t('{role} workspace', { role: t(role) })}</p></div>{children}</div></main>
         <AppFooter schoolName={schoolName} />
       </div>
       {canEditProfile && <ProfileView open={profileOpen} onClose={() => setProfileOpen(false)} onProfileUpdated={onUserUpdated} />}

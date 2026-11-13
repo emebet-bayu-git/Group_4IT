@@ -95,7 +95,7 @@ export default function AdvisorAggregationView() {
             {loadingResults && <p role="status" className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-500">{t('Loading section marksheet…')}</p>}
             {results && <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4">
-                <div><h2 className="font-bold text-slate-900">{currentSection ? `${t(currentSection.gradeLevel)} · ${t(currentSection.sectionName)}` : ''}</h2><p className="mt-1 text-xs text-slate-500">{results.students.length} {t('students')} · {results.subjects.length} {t('subject assignments')}</p></div>
+                <div><h2 className="font-bold text-slate-900">{currentSection ? `${t(currentSection.gradeLevel)} · ${t(currentSection.sectionName)}` : ''}</h2><p className="mt-1 text-xs text-slate-500">{results.students.length} {t('students')} · {results.subjects.length} {t('subject assignments')}</p><p className="mt-1 text-xs text-slate-600">{t('Homeroom Teacher')}: {results.section?.homeroomTeacherName || t('Unassigned')}</p></div>
                 <div className="flex items-center gap-2">
                   {results.submission
                     ? <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-semibold text-success-700">{t(results.submission.status === 'published' ? 'Permanently archived' : results.submission.status === 'approved' ? 'Principal approved and locked' : 'Submitted for principal approval')}</span>

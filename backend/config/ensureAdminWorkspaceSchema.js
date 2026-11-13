@@ -12,6 +12,18 @@ async function ensureColumn(table, column, definition) {
   }
 }
 
+async function ensureNullableColumn(table, column, definition) {
+  const [rows] = await pool.execute(
+    `SELECT is_nullable AS isNullable FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+     LIMIT 1`,
+    [table, column]
+  )
+  if (rows[0]?.isNullable !== 'YES') {
+    await pool.query(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${definition}`)
+  }
+}
+
 async function hasColumn(table, column) {
   const [rows] = await pool.execute(
     `SELECT 1 FROM information_schema.columns
@@ -57,6 +69,143 @@ async function ensureSchoolScopedUniqueIndex(table, indexName, columns, legacyCo
   )
   if (updatedIndexes[0]?.indexColumns !== desiredSignature) {
     await pool.query(`ALTER TABLE \`${table}\` ADD UNIQUE KEY \`${indexName}\` (${columns.map((column) => `\`${column}\``).join(', ')})`)
+  }
+}
+
+const normalizeSemesterName = (name) => String(name || '')
+  .trim()
+  .replace(/^(?:term|semister)\s*/i, 'Semester ')
+  .toLowerCase()
+
+const roundedAverage = (values) => Math.round(values.reduce((sum, value) => sum + Number(value), 0) / values.length * 100) / 100
+
+async function backfillApprovedStudentTermSummaries() {
+  const [submissions] = await pool.execute(
+    `SELECT submission.id AS submissionId, submission.school_id AS schoolId,
+            submission.section_id AS sectionId,
+            submission.academic_year_id AS academicYearId,
+            submission.term_id AS termId,
+            COALESCE(submission.approved_at, submission.published_at, submission.submitted_at, CURRENT_TIMESTAMP) AS approvedAt,
+            section.grade_level AS gradeLevel, section.section_name AS sectionName
+     FROM section_result_submissions submission
+     JOIN school_sections section ON section.id = submission.section_id
+     WHERE submission.status IN ('approved', 'published')
+       AND EXISTS (
+         SELECT 1 FROM teacher_class_assignments assignment
+         JOIN student_grades grade ON grade.assignment_id = assignment.id
+           AND grade.school_id = assignment.school_id
+           AND grade.academic_year_id = submission.academic_year_id
+           AND grade.term_id = submission.term_id
+         WHERE assignment.school_id = submission.school_id
+           AND assignment.section_id = submission.section_id
+           AND NOT EXISTS (
+             SELECT 1 FROM approved_student_term_summaries summary
+             WHERE summary.submission_id = submission.id
+               AND summary.student_id = grade.student_id
+           )
+       )`
+  )
+  for (const submission of submissions) {
+    const [averages] = await pool.execute(
+      `SELECT grade.student_id AS studentId, AVG(grade.total_100) AS average
+       FROM teacher_class_assignments assignment
+       JOIN student_grades grade ON grade.assignment_id = assignment.id
+         AND grade.school_id = assignment.school_id
+         AND grade.academic_year_id = ? AND grade.term_id = ?
+       WHERE assignment.school_id = ? AND assignment.section_id = ?
+       GROUP BY grade.student_id`,
+      [submission.academicYearId, submission.termId, submission.schoolId, submission.sectionId]
+    )
+    averages.sort((left, right) => Number(right.average) - Number(left.average))
+    let previousAverage = null
+    let previousRank = 0
+    for (let index = 0; index < averages.length; index += 1) {
+      const item = averages[index]
+      const average = Math.round(Number(item.average) * 100) / 100
+      if (average !== previousAverage) previousRank = index + 1
+      previousAverage = average
+      await pool.execute(
+        `INSERT IGNORE INTO approved_student_term_summaries
+          (school_id, student_id, section_id, submission_id, academic_year_id, term_id,
+           grade_level, section_name, average_100, section_rank, approved_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [submission.schoolId, item.studentId, submission.sectionId, submission.submissionId,
+          submission.academicYearId, submission.termId, submission.gradeLevel,
+          submission.sectionName, average, previousRank, submission.approvedAt]
+      )
+    }
+  }
+
+  const [incompleteAnnualGroups] = await pool.execute(
+    `SELECT DISTINCT summary.school_id AS schoolId,
+            summary.academic_year_id AS academicYearId,
+            summary.grade_level AS gradeLevel
+     FROM approved_student_term_summaries summary
+     JOIN academic_terms term ON term.id = summary.term_id
+       AND term.school_id = summary.school_id
+     WHERE LOWER(REPLACE(term.name, ' ', '')) IN ('semester2', 'term2', 'semister2')
+       AND summary.annual_average_100 IS NULL
+       AND EXISTS (
+         SELECT 1 FROM approved_student_term_summaries firstTerm
+         JOIN academic_terms firstSemester ON firstSemester.id = firstTerm.term_id
+         WHERE firstTerm.school_id = summary.school_id
+           AND firstTerm.academic_year_id = summary.academic_year_id
+           AND firstTerm.grade_level = summary.grade_level
+           AND LOWER(REPLACE(firstSemester.name, ' ', '')) IN ('semester1', 'term1', 'semister1')
+       )`
+  )
+  for (const group of incompleteAnnualGroups) {
+    const [terms] = await pool.execute(
+      `SELECT id, name FROM academic_terms
+       WHERE school_id = ? AND academic_year_id = ?`,
+      [group.schoolId, group.academicYearId]
+    )
+    const semester1 = terms.find((term) => normalizeSemesterName(term.name) === 'semester 1')
+    const semester2 = terms.find((term) => normalizeSemesterName(term.name) === 'semester 2')
+    if (!semester1 || !semester2) continue
+    const [summaries] = await pool.execute(
+      `SELECT student_id AS studentId, term_id AS termId, average_100 AS average,
+              section_name AS sectionName
+       FROM approved_student_term_summaries
+       WHERE school_id = ? AND academic_year_id = ? AND grade_level = ?
+         AND term_id IN (?, ?)`,
+      [group.schoolId, group.academicYearId, group.gradeLevel, semester1.id, semester2.id]
+    )
+    const annualByStudent = new Map()
+    for (const summary of summaries) {
+      const item = annualByStudent.get(Number(summary.studentId)) || {}
+      if (Number(summary.termId) === Number(semester1.id)) item.semester1 = Number(summary.average)
+      else {
+        item.semester2 = Number(summary.average)
+        item.sectionName = summary.sectionName
+      }
+      annualByStudent.set(Number(summary.studentId), item)
+    }
+    const bySection = new Map()
+    for (const [studentId, item] of annualByStudent) {
+      if (!Number.isFinite(item.semester1) || !Number.isFinite(item.semester2)) continue
+      const sectionAverages = bySection.get(item.sectionName) || []
+      sectionAverages.push({ studentId, average: roundedAverage([item.semester1, item.semester2]) })
+      bySection.set(item.sectionName, sectionAverages)
+    }
+    for (const [sectionName, sectionAverages] of bySection) {
+      sectionAverages.sort((left, right) => right.average - left.average)
+      let previousAverage = null
+      let previousRank = 0
+      for (let index = 0; index < sectionAverages.length; index += 1) {
+        const item = sectionAverages[index]
+        if (item.average !== previousAverage) previousRank = index + 1
+        previousAverage = item.average
+        await pool.execute(
+          `UPDATE approved_student_term_summaries
+           SET annual_average_100 = ?, annual_rank = ?, promotion_status = ?
+           WHERE school_id = ? AND student_id = ? AND academic_year_id = ?
+             AND term_id = ? AND section_name = ?`,
+          [item.average, previousRank, item.average >= 60 ? 'Promoted' : 'Retained',
+            group.schoolId, item.studentId, group.academicYearId, semester2.id, sectionName]
+        )
+      }
+    }
   }
 }
 
@@ -263,6 +412,13 @@ export async function ensureAdminWorkspaceSchema() {
     CONSTRAINT fk_school_section_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE RESTRICT,
     CONSTRAINT fk_school_section_term FOREIGN KEY (academic_term_id) REFERENCES academic_terms(id) ON DELETE RESTRICT
   )`)
+  await ensureColumn('academic_years', 'school_id', 'INT NOT NULL DEFAULT 1')
+  await ensureColumn('academic_terms', 'school_id', 'INT NOT NULL DEFAULT 1')
+  await ensureColumn('academic_terms', 'is_active', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await ensureColumn('academic_terms', 'is_current', 'BOOLEAN NOT NULL DEFAULT FALSE')
+  await ensureColumn('school_sections', 'school_id', 'INT NOT NULL DEFAULT 1')
+  await ensureColumn('school_sections', 'academic_year_id', 'INT NULL')
+  await ensureColumn('school_sections', 'academic_term_id', 'INT NULL')
   await pool.query(`CREATE TABLE IF NOT EXISTS teacher_class_assignments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     teacher_id INT NOT NULL,
@@ -315,9 +471,45 @@ export async function ensureAdminWorkspaceSchema() {
     id INT AUTO_INCREMENT PRIMARY KEY,
     school_id INT NOT NULL,
     name VARCHAR(100) NOT NULL,
+    department VARCHAR(100) NULL,
     UNIQUE KEY uq_school_subject_name (school_id, name),
     CONSTRAINT fk_school_subject_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
   )`)
+  await ensureColumn('school_subjects', 'department', 'VARCHAR(100) NULL')
+  await pool.query(`CREATE TABLE IF NOT EXISTS school_grade_curriculum (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    school_id INT NOT NULL,
+    grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NOT NULL,
+    subject_id INT NOT NULL,
+    weekly_periods INT NOT NULL DEFAULT 4,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_school_grade_curriculum_subject (school_id, grade_level, subject_id),
+    CONSTRAINT fk_grade_curriculum_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_grade_curriculum_subject FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE
+  )`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS school_academic_settings (
+    school_id INT PRIMARY KEY,
+    max_weekly_periods INT NOT NULL DEFAULT 24,
+    CONSTRAINT fk_school_academic_settings_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
+  )`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS section_subject_teachers (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    school_id INT NOT NULL,
+    academic_year_id INT NOT NULL,
+    section_id INT NOT NULL,
+    subject_id INT NOT NULL,
+    teacher_id INT NULL,
+    weekly_periods INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_section_subject_teacher_year (school_id, academic_year_id, section_id, subject_id),
+    INDEX idx_section_subject_teacher_load (school_id, academic_year_id, teacher_id),
+    CONSTRAINT fk_section_subject_teacher_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_subject_teacher_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_subject_teacher_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_subject_teacher_subject FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_section_subject_teacher_user FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE
+  )`)
+  await ensureNullableColumn('section_subject_teachers', 'teacher_id', 'INT NULL')
   await pool.query(`CREATE TABLE IF NOT EXISTS teacher_subject_assignments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     teacher_id INT NOT NULL,
@@ -364,6 +556,33 @@ export async function ensureAdminWorkspaceSchema() {
      JOIN school_subjects subject ON subject.school_id = assignment.school_id
        AND subject.name = TRIM(assignment.subject)`
   )
+  await pool.query(
+    `INSERT IGNORE INTO school_grade_curriculum
+       (school_id, grade_level, subject_id, weekly_periods)
+     SELECT DISTINCT assignment.school_id, assignment.grade_level, assignment.subject_id, 4
+     FROM teacher_subject_assignments assignment`
+  )
+  await pool.query(
+    `INSERT IGNORE INTO school_academic_settings (school_id)
+     SELECT id FROM schools`
+  )
+  await pool.query(
+    `INSERT IGNORE INTO section_subject_teachers
+       (school_id, academic_year_id, section_id, subject_id, teacher_id, weekly_periods)
+     SELECT assignment.school_id, COALESCE(section.academic_year_id, year.id),
+            assignment.section_id, assignment.subject_id, MIN(assignment.teacher_id),
+            COALESCE(curriculum.weekly_periods, 4)
+     FROM teacher_subject_assignments assignment
+     JOIN school_sections section ON section.id = assignment.section_id
+       AND section.school_id = assignment.school_id
+     JOIN academic_years year ON year.school_id = assignment.school_id AND year.is_active = TRUE
+     LEFT JOIN school_grade_curriculum curriculum
+       ON curriculum.school_id = assignment.school_id
+       AND curriculum.grade_level = section.grade_level
+       AND curriculum.subject_id = assignment.subject_id
+     GROUP BY assignment.school_id, COALESCE(section.academic_year_id, year.id),
+              assignment.section_id, assignment.subject_id, curriculum.weekly_periods`
+  )
   await pool.query(`CREATE TABLE IF NOT EXISTS school_settings (
     setting_key VARCHAR(60) PRIMARY KEY,
     setting_value TEXT NULL,
@@ -376,10 +595,6 @@ export async function ensureAdminWorkspaceSchema() {
      ('closure_message', '', 1)
      ON DUPLICATE KEY UPDATE setting_key = VALUES(setting_key)`
   )
-  await ensureColumn('academic_years', 'school_id', 'INT NOT NULL DEFAULT 1')
-  await ensureColumn('academic_terms', 'school_id', 'INT NOT NULL DEFAULT 1')
-  await ensureColumn('academic_terms', 'is_active', 'BOOLEAN NOT NULL DEFAULT FALSE')
-  await ensureColumn('academic_terms', 'is_current', 'BOOLEAN NOT NULL DEFAULT FALSE')
   await pool.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     migration_key VARCHAR(100) PRIMARY KEY,
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -395,9 +610,6 @@ export async function ensureAdminWorkspaceSchema() {
        VALUES ('academic_terms_current_flag')`
     )
   }
-  await ensureColumn('school_sections', 'school_id', 'INT NOT NULL DEFAULT 1')
-  await ensureColumn('school_sections', 'academic_year_id', 'INT NULL')
-  await ensureColumn('school_sections', 'academic_term_id', 'INT NULL')
   await ensureColumn('school_settings', 'school_id', 'INT NOT NULL DEFAULT 1')
   await ensureSchoolScopedUniqueIndex('academic_years', 'uq_academic_year_school_name', ['school_id', 'name'], ['name'])
   await ensureSchoolScopedUniqueIndex('school_sections', 'uq_school_period_grade_section', ['school_id', 'academic_year_id', 'academic_term_id', 'grade_level', 'section_name'], ['grade_level', 'section_name'])
@@ -445,6 +657,7 @@ export async function ensureAdminWorkspaceSchema() {
     grade ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NULL,
     grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NOT NULL,
     section VARCHAR(30) NULL,
+    section_id INT NULL DEFAULT NULL,
     gender ENUM('Female', 'Male') NULL,
     previous_school VARCHAR(200) NULL,
     region VARCHAR(100) NULL,
@@ -489,7 +702,8 @@ export async function ensureAdminWorkspaceSchema() {
   await ensureColumn('students', 'grade', "ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NULL")
   await ensureColumn('students', 'grade_level', 'VARCHAR(20) NULL')
   await ensureColumn('students', 'section', 'VARCHAR(30) NULL')
-  await ensureColumn('students', 'section_id', 'INT NULL')
+  await ensureColumn('students', 'section_id', 'INT NULL DEFAULT NULL')
+  await pool.query('ALTER TABLE students MODIFY section_id INT NULL DEFAULT NULL')
   await ensureColumn('students', 'academic_status', "VARCHAR(50) NOT NULL DEFAULT 'Enrolled'")
   await ensureColumn('students', 'section_status', "VARCHAR(50) NOT NULL DEFAULT 'Pending Check-In'")
   await ensureColumn('students', 'enrollment_year_id', 'INT NULL')
@@ -607,6 +821,12 @@ export async function ensureAdminWorkspaceSchema() {
      WHERE student.section_status = 'Pending Check-In'
        OR student.academic_status IS NULL OR student.academic_status = ''
        OR (student.section_id IS NOT NULL AND student.enrollment_year_id IS NULL)`
+  )
+  await pool.query(
+    `UPDATE students
+     SET academic_status = 'Active'
+     WHERE COALESCE(NULLIF(grade, ''), grade_level) = 'Grade 9'
+       AND academic_status = 'Enrolled'`
   )
   await pool.query('UPDATE students SET section = NULL WHERE section_id IS NULL')
   await pool.query(
@@ -748,6 +968,34 @@ export async function ensureAdminWorkspaceSchema() {
     'fk_section_submission_school',
     'ALTER TABLE section_result_submissions ADD CONSTRAINT fk_section_submission_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE'
   )
+  await pool.query(`CREATE TABLE IF NOT EXISTS approved_student_term_summaries (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    school_id INT NOT NULL,
+    student_id INT NOT NULL,
+    section_id INT NOT NULL,
+    submission_id BIGINT NOT NULL,
+    academic_year_id INT NOT NULL,
+    term_id INT NOT NULL,
+    grade_level VARCHAR(30) NOT NULL,
+    section_name VARCHAR(30) NOT NULL,
+    average_100 DECIMAL(5,2) NOT NULL,
+    section_rank INT NOT NULL,
+    annual_average_100 DECIMAL(5,2) NULL,
+    annual_rank INT NULL,
+    promotion_status VARCHAR(20) NULL,
+    approved_at DATETIME NOT NULL,
+    UNIQUE KEY uq_approved_student_term (school_id, student_id, academic_year_id, term_id),
+    UNIQUE KEY uq_approved_student_submission (submission_id, student_id),
+    INDEX idx_approved_student_history (school_id, student_id, academic_year_id, term_id),
+    INDEX idx_approved_section_term (school_id, academic_year_id, grade_level, section_name, term_id),
+    CONSTRAINT fk_approved_summary_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_approved_summary_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    CONSTRAINT fk_approved_summary_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+    CONSTRAINT fk_approved_summary_submission FOREIGN KEY (submission_id) REFERENCES section_result_submissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_approved_summary_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+    CONSTRAINT fk_approved_summary_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
+  await backfillApprovedStudentTermSummaries()
   await pool.query(`CREATE TABLE IF NOT EXISTS permanent_academic_records (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     school_id INT NOT NULL,

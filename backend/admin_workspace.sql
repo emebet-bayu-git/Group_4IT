@@ -181,6 +181,8 @@ CREATE TABLE IF NOT EXISTS school_subjects (
   UNIQUE KEY uq_school_subject_name (school_id, name)
 );
 
+CALL add_column_if_missing('school_subjects', 'department', 'VARCHAR(100) NULL');
+
 CREATE TABLE IF NOT EXISTS teacher_subject_assignments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   teacher_id INT NOT NULL,
@@ -195,6 +197,67 @@ CREATE TABLE IF NOT EXISTS teacher_subject_assignments (
   CONSTRAINT fk_teacher_subject_catalog FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE,
   CONSTRAINT fk_teacher_subject_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS school_grade_curriculum (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  school_id INT NOT NULL,
+  grade_level ENUM('Grade 9', 'Grade 10', 'Grade 11', 'Grade 12') NOT NULL,
+  subject_id INT NOT NULL,
+  weekly_periods INT NOT NULL DEFAULT 4,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_school_grade_curriculum_subject (school_id, grade_level, subject_id),
+  CONSTRAINT fk_grade_curriculum_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+  CONSTRAINT fk_grade_curriculum_subject FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS school_academic_settings (
+  school_id INT PRIMARY KEY,
+  max_weekly_periods INT NOT NULL DEFAULT 24,
+  CONSTRAINT fk_school_academic_settings_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS section_subject_teachers (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  school_id INT NOT NULL,
+  academic_year_id INT NOT NULL,
+  section_id INT NOT NULL,
+  subject_id INT NOT NULL,
+  teacher_id INT NULL,
+  weekly_periods INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_section_subject_teacher_year (school_id, academic_year_id, section_id, subject_id),
+  INDEX idx_section_subject_teacher_load (school_id, academic_year_id, teacher_id),
+  CONSTRAINT fk_section_subject_teacher_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+  CONSTRAINT fk_section_subject_teacher_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+  CONSTRAINT fk_section_subject_teacher_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+  CONSTRAINT fk_section_subject_teacher_subject FOREIGN KEY (subject_id) REFERENCES school_subjects(id) ON DELETE CASCADE,
+  CONSTRAINT fk_section_subject_teacher_user FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+ALTER TABLE section_subject_teachers MODIFY COLUMN teacher_id INT NULL;
+
+INSERT IGNORE INTO school_academic_settings (school_id)
+SELECT id FROM schools;
+
+INSERT IGNORE INTO school_grade_curriculum (school_id, grade_level, subject_id, weekly_periods)
+SELECT DISTINCT school_id, grade_level, subject_id, 4
+FROM teacher_subject_assignments;
+
+INSERT IGNORE INTO section_subject_teachers
+  (school_id, academic_year_id, section_id, subject_id, teacher_id, weekly_periods)
+SELECT assignment.school_id, COALESCE(section.academic_year_id, year.id),
+       assignment.section_id, assignment.subject_id, MIN(assignment.teacher_id),
+       COALESCE(curriculum.weekly_periods, 4)
+FROM teacher_subject_assignments assignment
+JOIN school_sections section ON section.id = assignment.section_id
+  AND section.school_id = assignment.school_id
+JOIN academic_years year ON year.school_id = assignment.school_id AND year.is_active = TRUE
+LEFT JOIN school_grade_curriculum curriculum
+  ON curriculum.school_id = assignment.school_id
+  AND curriculum.grade_level = section.grade_level
+  AND curriculum.subject_id = assignment.subject_id
+GROUP BY assignment.school_id, COALESCE(section.academic_year_id, year.id),
+         assignment.section_id, assignment.subject_id, curriculum.weekly_periods;
 
 CREATE TABLE IF NOT EXISTS section_result_submissions (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

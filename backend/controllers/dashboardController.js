@@ -38,6 +38,7 @@ async function getConfiguredAcademicOptions(executor = pool, schoolId = null) {
 }
 
 async function getActiveSectionId(executor, schoolId, grade, sectionName) {
+  if (!sectionName) return null
   const [[section]] = await executor.execute(
     `SELECT id FROM school_sections
      WHERE school_id = ? AND grade_level = ? AND section_name = ? AND is_active = TRUE
@@ -187,12 +188,16 @@ export async function listStudents(req, res, next) {
                   student.academic_status AS academicStatus,
                   student.section_status AS sectionStatus,
                   student.section_id AS sectionId,
+                  homeroom.full_name AS homeroomTeacherName,
                   COALESCE(student.emergency_contact_phone, student.emergency_contact) AS emergencyContact,
                   student.emergency_contact_name AS emergencyContactName,
                   student.registration_date AS registrationDate,
             student.status, student.created_at AS createdAt
            FROM students student
           LEFT JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
+          LEFT JOIN school_sections section ON section.id = student.section_id
+            AND section.school_id = student.school_id
+          LEFT JOIN users homeroom ON homeroom.id = section.homeroom_teacher_id
            WHERE student.school_id = ?
            ORDER BY student.created_at DESC`,
       [schoolId]
@@ -235,12 +240,11 @@ export async function getRegistrarSectionAllocation(req, res, next) {
               student.gender, student.section
        FROM students student
        JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
-       WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
-         AND ${confirmedEnrollmentSql}
+       WHERE student.school_id = ?
          AND (student.enrollment_year_id = ?
            OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
-         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?
          AND student.section_id IS NULL
+         AND student.grade_level = ?
        ORDER BY student.full_name, student.user_id`,
       [schoolId, period.academicYearId, period.academicYear, grade]
     )
@@ -261,8 +265,7 @@ export async function getRegistrarSectionAllocation(req, res, next) {
     const [gradeCounts] = await pool.execute(
       `SELECT COALESCE(NULLIF(grade, ''), grade_level) AS gradeLevel, COUNT(*) AS studentCount
        FROM students
-       WHERE school_id = ? AND status IN ('Unassigned', 'Active') AND section_id IS NULL
-         AND ${confirmedEnrollmentSql}
+       WHERE school_id = ? AND section_id IS NULL
          AND (enrollment_year_id = ?
            OR (enrollment_year_id IS NULL AND academic_year = ?))
        GROUP BY COALESCE(NULLIF(grade, ''), grade_level)`,
@@ -435,12 +438,11 @@ export async function previewRegistrarSections(req, res, next) {
               account.student_number AS studentNumber, student.full_name AS name, student.gender
        FROM students student
        JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
-       WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
-         AND LOWER(TRIM(student.section_status)) IN ('confirmed / enrolled', 'confirmed', 'enrolled')
+       WHERE student.school_id = ?
          AND (student.enrollment_year_id = ?
            OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
          AND student.section_id IS NULL
-         AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?`,
+         AND student.grade_level = ?`,
       [schoolId, period.academicYearId, period.academicYear, grade]
     )
     const [counts] = await pool.execute(
@@ -676,12 +678,11 @@ export async function assignRegistrarSections(req, res, next) {
              account.student_number AS studentNumber, student.full_name AS name, student.gender
       FROM students student
       JOIN users account ON account.id = student.user_id AND account.school_id = student.school_id
-      WHERE student.school_id = ? AND student.status IN ('Unassigned', 'Active')
-       AND LOWER(TRIM(student.section_status)) IN ('confirmed / enrolled', 'confirmed', 'enrolled')
+      WHERE student.school_id = ?
        AND (student.enrollment_year_id = ?
          OR (student.enrollment_year_id IS NULL AND student.academic_year = ?))
        AND student.section_id IS NULL
-       AND COALESCE(NULLIF(student.grade, ''), student.grade_level) = ?
+       AND student.grade_level = ?
       ORDER BY student.full_name, student.user_id FOR UPDATE`,
       [schoolId, period.academicYearId, period.academicYear, grade]
     )
@@ -773,10 +774,11 @@ export async function assignRegistrarSections(req, res, next) {
       const userPlaceholders = studentUserIds.map(() => '?').join(', ')
       const [updated] = await connection.execute(
         `UPDATE students SET section_id = ?, section = ?, status = 'Active'
-         WHERE id IN (${studentPlaceholders}) AND school_id = ? AND status IN ('Unassigned', 'Active') AND section_id IS NULL
-           AND ${confirmedEnrollmentSql}
-           AND (enrollment_year_id = ? OR (enrollment_year_id IS NULL AND academic_year = ?))`,
-        [sectionId, section.sectionName, ...studentIdsForSection, schoolId, period.academicYearId, period.academicYear]
+         WHERE id IN (${studentPlaceholders}) AND school_id = ? AND section_id IS NULL
+           AND (enrollment_year_id = ? OR (enrollment_year_id IS NULL AND academic_year = ?))
+           AND grade_level = ?`,
+        [sectionId, section.sectionName, ...studentIdsForSection, schoolId,
+          period.academicYearId, period.academicYear, grade]
       )
       if (Number(updated.affectedRows) !== studentIdsForSection.length) {
         await connection.rollback()
@@ -888,7 +890,7 @@ export async function updateStudent(req, res, next) {
     const email = field('email', 'email')
     const address = [region, zone, woreda, kebele, houseNo].filter(Boolean).join(', ') || existing.address || ''
     const password = typeof body.password === 'string' ? body.password : ''
-    const requiredFields = [fullName, dob, gender, grade, section, previousSchool, region, zone, woreda, kebele,
+    const requiredFields = [fullName, dob, gender, grade, previousSchool, region, zone, woreda, kebele,
       phoneNumber, guardianName, guardianRelation, guardianPhone, emergencyContactName, emergencyContactPhone,
       academicYear, registrationDate]
     if (requiredFields.some((value) => !value)) {
@@ -911,10 +913,10 @@ export async function updateStudent(req, res, next) {
     }
     const academicOptions = await getConfiguredAcademicOptions(pool, schoolId)
     if (!studentGrades.includes(grade) || !['Female', 'Male'].includes(gender)
-      || !academicOptions.sections.some((item) => item.gradeLevel === grade && item.sectionName === section)
+      || (section && !academicOptions.sections.some((item) => item.gradeLevel === grade && item.sectionName === section))
       || !academicOptions.years.includes(academicYear)) {
       await cleanupUploadedPhotos()
-      return res.status(400).json({ message: 'Select a valid grade, section, and academic year.' })
+      return res.status(400).json({ message: 'Select a valid grade and academic year, and a valid section if assigning one.' })
     }
     const parsedDob = new Date(`${dob}T00:00:00Z`)
     const parsedRegistrationDate = new Date(`${registrationDate}T00:00:00Z`)
@@ -946,6 +948,7 @@ export async function updateStudent(req, res, next) {
     connection = await pool.getConnection()
     await connection.beginTransaction()
     const sectionId = await getActiveSectionId(connection, schoolId, grade, section)
+    const sectionName = sectionId ? section : null
     await connection.execute(
       `UPDATE users SET full_name = ?, grade_level = ?${passwordHash ? ', password = ?' : ''}
        WHERE id = ? AND school_id = ? AND role = 'Student'`,
@@ -961,7 +964,7 @@ export async function updateStudent(req, res, next) {
          emergency_contact_name = ?, emergency_contact_phone = ?, emergency_contact = ?,
          address = ?, photo_path = ?, parent_photo_url = ?, academic_year = ?, registration_date = ?
        WHERE user_id = ? AND school_id = ?`,
-      [fullName, email || null, dob, dob, gender, grade, grade, section, sectionId, previousSchool,
+      [fullName, email || null, dob, dob, gender, grade, grade, sectionName, sectionId, previousSchool,
         region, zone, woreda, kebele, houseNo || null, phoneNumber, phoneNumber, guardianName,
         guardianRelation, guardianRelation, guardianPhone, guardianEmail || null,
         emergencyContactName, emergencyContactPhone, emergencyContactPhone, address,
@@ -972,12 +975,12 @@ export async function updateStudent(req, res, next) {
          relationship = ?, guardian_phone = ?, guardian_email = ?, address = ?, section = ?,
          academic_year = ?, photo_path = ? WHERE user_id = ?`,
       [dob, gender, phoneNumber, guardianName, guardianRelation, guardianPhone, guardianEmail || null,
-        address, section, academicYear, photoPath, req.params.id]
+        address, sectionName, academicYear, photoPath, req.params.id]
     )
     await connection.commit()
     if (req.file && existing.photo_path) await removeStoredStudentPhoto(existing.photo_path)
     if (req.parentPhotoFile && existing.parent_photo_url) await removeStoredStudentPhoto(existing.parent_photo_url)
-    return res.json({ id: Number(req.params.id), studentId: String(req.params.id), name: fullName, className: grade, section, gender, status: existing.status })
+    return res.json({ id: Number(req.params.id), studentId: String(req.params.id), name: fullName, className: grade, section: sectionName, gender, status: sectionName ? existing.status : 'Unassigned' })
   } catch (error) {
     if (connection) await connection.rollback()
     await cleanupUploadedPhotos()
@@ -1052,14 +1055,35 @@ export async function getStudentProfile(req, res, next) {
   }
   try {
     const [rows] = await pool.execute(
-      `SELECT u.id, u.full_name AS name, u.email, u.grade_level AS className,
+      `SELECT u.id, u.full_name AS name, u.email,
+              COALESCE(currentStudent.grade, currentStudent.grade_level, u.grade_level) AS className,
               s.section, s.gender, s.phone, s.date_of_birth AS dateOfBirth,
               s.guardian_name AS guardianName, s.relationship AS guardianRelationship,
               s.guardian_phone AS guardianPhone, s.guardian_email AS guardianEmail,
               s.address, s.photo_path AS photoUrl, s.academic_year AS academicYear,
-              COALESCE(s.status, 'Active') AS status
+              COALESCE(currentStudent.status, s.status, 'Active') AS status,
+              currentStudent.academic_status AS academicStatus,
+              (currentStudent.academic_status IN ('Transferred', 'Transferred Out', 'Completed Grade 12')
+                OR (currentStudent.academic_status <> 'Repeating Grade 12'
+                  AND COALESCE(currentStudent.grade, currentStudent.grade_level, u.grade_level) = 'Grade 12'
+                  AND EXISTS (
+                    SELECT 1 FROM permanent_academic_records transcript
+                    WHERE transcript.school_id = currentStudent.school_id
+                      AND transcript.student_id = currentStudent.id
+                      AND transcript.grade_level = 'Grade 12'
+                      AND LOWER(REPLACE(transcript.semester, ' ', '')) IN ('semester2', 'term2', 'semister2')
+                      AND transcript.academic_year_id = (
+                        SELECT MAX(latest.academic_year_id)
+                        FROM permanent_academic_records latest
+                        WHERE latest.school_id = currentStudent.school_id
+                          AND latest.student_id = currentStudent.id
+                          AND latest.grade_level = 'Grade 12'
+                      )
+                  ))) AS transcriptAvailable
        FROM users u
        LEFT JOIN student_records s ON s.user_id = u.id
+       LEFT JOIN students currentStudent ON currentStudent.user_id = u.id
+         AND currentStudent.school_id = u.school_id
        WHERE u.id = ? AND u.role = 'Student'
        LIMIT 1`,
       [req.user.id]
@@ -1522,7 +1546,7 @@ export async function getPublicSchoolProfile(_req, res, next) {
     const [rows] = await pool.execute(
       `SELECT setting_key AS settingKey, setting_value AS settingValue
        FROM school_settings
-       WHERE setting_key IN ('school_id', 'school_name', 'region', 'wereda', 'logo_path', 'stamp_path')`
+       WHERE setting_key IN ('school_id', 'school_name', 'region', 'zone', 'wereda', 'logo_path', 'stamp_path')`
     )
     res.json(Object.fromEntries(rows.map((row) => [row.settingKey, row.settingValue])))
   } catch (error) { next(error) }
