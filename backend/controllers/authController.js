@@ -31,15 +31,20 @@ export async function login(req, res, next) {
   try {
     const [users] = await pool.execute(
       `SELECT id, full_name, password, role, avatar_path, is_active, failed_login_attempts,
-              locked_until, token_version, registration_source, must_change_password
+              locked_until, locked_until IS NOT NULL AND locked_until > NOW() AS is_locked,
+              email = ? AS matched_by_email,
+              token_version, registration_source, must_change_password
        FROM users
        WHERE email = ? OR username = ? OR (? = TRUE AND id = ?)
        ORDER BY (email = ? OR username = ?) DESC
        LIMIT 1`,
-      [normalizedEmail, normalizedUsername, isNumericId, isNumericId ? numericId : 0,
+      [normalizedEmail, normalizedEmail, normalizedUsername, isNumericId, isNumericId ? numericId : 0,
         normalizedEmail, normalizedUsername]
     )
     const user = users[0]
+    console.info('[auth.login] account lookup', {
+      foundByEmail: Number(user?.matched_by_email) === 1,
+    })
     if (!user || !user.is_active || !['admin', 'registrar'].includes(user.registration_source)) {
       return res.status(403).json({ message: 'Account not authorized or pending admin registration' })
     }
@@ -59,13 +64,19 @@ export async function login(req, res, next) {
         })
       }
     }
-    if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+    if (Number(user.is_locked) === 1) {
       return res.status(423).json({ message: 'This account is temporarily locked after failed sign-in attempts.' })
     }
     if (user.locked_until) {
-      await pool.execute('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?', [user.id])
+      await pool.execute(
+        `UPDATE users SET failed_login_attempts = 0, locked_until = NULL
+         WHERE id = ? AND locked_until <= NOW()`,
+        [user.id]
+      )
     }
-    if (!(await bcrypt.compare(password, user.password))) {
+    const passwordMatches = await bcrypt.compare(password, user.password)
+    console.info('[auth.login] password comparison', { matched: passwordMatches })
+    if (!passwordMatches) {
       const [policies] = await pool.execute(
         'SELECT max_failed_logins, lockout_minutes FROM system_security_policy WHERE id = 1'
       )

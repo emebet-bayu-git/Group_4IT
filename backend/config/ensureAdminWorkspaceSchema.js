@@ -938,7 +938,7 @@ export async function ensureAdminWorkspaceSchema() {
     school_id INT NOT NULL,
     academic_year_id INT NOT NULL,
     term_id INT NOT NULL,
-    status ENUM('submitted', 'published') NOT NULL DEFAULT 'submitted',
+    status ENUM('awaiting_principal_approval', 'approved', 'published') NOT NULL DEFAULT 'awaiting_principal_approval',
     submitted_by INT NOT NULL,
     submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_by INT NULL,
@@ -952,7 +952,28 @@ export async function ensureAdminWorkspaceSchema() {
     CONSTRAINT fk_section_submission_submitter FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE RESTRICT,
     CONSTRAINT fk_section_submission_publisher FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE RESTRICT
   )`)
-  await pool.query("ALTER TABLE section_result_submissions MODIFY status ENUM('submitted', 'approved', 'published') NOT NULL DEFAULT 'submitted'")
+  await pool.query(`CREATE TABLE IF NOT EXISTS teacher_subject_result_submissions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    assignment_id BIGINT NOT NULL,
+    section_id INT NOT NULL,
+    school_id INT NOT NULL,
+    academic_year_id INT NOT NULL,
+    term_id INT NOT NULL,
+    status ENUM('submitted_to_homeroom') NOT NULL DEFAULT 'submitted_to_homeroom',
+    submitted_by INT NOT NULL,
+    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_teacher_subject_submission_period (assignment_id, academic_year_id, term_id),
+    INDEX idx_teacher_subject_submission_section (section_id, academic_year_id, term_id),
+    CONSTRAINT fk_teacher_subject_submission_assignment FOREIGN KEY (assignment_id) REFERENCES teacher_class_assignments(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_submission_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_submission_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_submission_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_submission_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_teacher_subject_submission_teacher FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE RESTRICT
+  )`)
+  await pool.query("ALTER TABLE section_result_submissions MODIFY status ENUM('submitted', 'awaiting_principal_approval', 'approved', 'published') NOT NULL DEFAULT 'awaiting_principal_approval'")
+  await pool.query("UPDATE section_result_submissions SET status = 'awaiting_principal_approval' WHERE status = 'submitted'")
+  await pool.query("ALTER TABLE section_result_submissions MODIFY status ENUM('awaiting_principal_approval', 'approved', 'published') NOT NULL DEFAULT 'awaiting_principal_approval'")
   await ensureColumn('section_result_submissions', 'approved_by', 'INT NULL')
   await ensureColumn('section_result_submissions', 'approved_at', 'TIMESTAMP NULL')
   await ensureColumn('section_result_submissions', 'approval_stamp_path', 'VARCHAR(500) NULL')
@@ -1029,4 +1050,16 @@ export async function ensureAdminWorkspaceSchema() {
     INDEX idx_permanent_student_history (school_id, student_id, archived_at),
     INDEX idx_permanent_school_period (school_id, academic_year_id, term_id)
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`)
+  await ensureColumn('permanent_academic_records', 'homeroom_teacher_name', 'VARCHAR(150) NULL')
+  await ensureColumn('permanent_academic_records', 'approved_by', 'INT NULL')
+  await ensureColumn('permanent_academic_records', 'approved_at', 'DATETIME NULL')
+  await pool.query(
+    `UPDATE permanent_academic_records archived
+     JOIN section_result_submissions submission
+       ON submission.id = archived.source_submission_id
+       AND submission.school_id = archived.school_id
+     SET archived.approved_by = COALESCE(archived.approved_by, submission.approved_by),
+         archived.approved_at = COALESCE(archived.approved_at, submission.approved_at)
+     WHERE archived.approved_by IS NULL OR archived.approved_at IS NULL`
+  )
 }

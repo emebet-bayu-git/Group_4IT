@@ -83,5 +83,5 @@ INSERT IGNORE INTO role_tasks (role, task_title, task_description, action_route)
 
 INSERT IGNORE INTO users (full_name, email, password, role, grade_level, must_change_password) VALUES
 ('Super Admin User', 'superadmin@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Super Admin', 'N/A', FALSE),
-('Abebe Kebede (Student)', 'student@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Student', 'Grade 11', TRUE),
-('Tewodros Kassahun (Teacher)', 'teacher@school.edu.et', '$2a$10$orwtqq/L94apbA1GTuelQe/kMy7yp7/VMNWHJa0Kg9/m4TYMPFMDy', 'Teacher', 'N/A', TRUE);
+('Abebe Kebede (Student)', 'student@school.edu.et', '$2a$10$/KVbUs6uOzTF7GF8hFrdSeenW0677Z6j4qpZ3BKp1gyLNSB3IMMaK', 'Student', 'Grade 11', TRUE),
+('Tewodros Kassahun (Teacher)', 'teacher@school.edu.et', '$2a$10$/KVbUs6uOzTF7GF8hFrdSeenW0677Z6j4qpZ3BKp1gyLNSB3IMMaK', 'Teacher', 'N/A', TRUE);

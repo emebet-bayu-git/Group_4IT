@@ -336,7 +336,10 @@ export async function listSchoolStaff(req, res, next) {
               teachers.woreda_employee_id AS woredaEmployeeId,
               teachers.phone_number AS phoneNumber,
               teachers.specialization, teachers.qualification_degree AS qualificationDegree,
-              users.is_active AS isActive, users.created_at AS createdAt
+              users.is_active AS isActive,
+              users.failed_login_attempts AS failedLoginAttempts,
+              users.locked_until AS lockedUntil,
+              users.created_at AS createdAt
        FROM users
        LEFT JOIN teachers ON teachers.id = users.id AND teachers.school_id = users.school_id
       WHERE users.school_id = ? AND users.role IN ('Teacher', 'Registrar', 'Headmaster', 'Vice Principal', 'Supervisor')
@@ -929,19 +932,32 @@ export async function unlockUser(req, res, next) {
   const id = req.params.id
   if (!validId(id)) return res.status(400).json({ message: 'Invalid user ID.' })
   try {
-    const [target] = await pool.execute('SELECT role, email FROM users WHERE id = ? LIMIT 1', [id])
+    const [target] = await pool.execute('SELECT role, email, school_id AS schoolId FROM users WHERE id = ? LIMIT 1', [id])
     if (!target.length) return res.status(404).json({ message: 'User not found.' })
     if (isProtectedDefaultAdminUser(target[0])) {
       return res.status(403).json({ message: 'The default Super Admin account is protected and cannot be unlocked.' })
     }
-    if (req.user.role !== 'Super Admin' && target[0].role === 'Super Admin') {
-      return res.status(403).json({ message: 'Delegated administrators cannot unlock Super Admin accounts.' })
+
+    if (req.user.role === 'School Admin') {
+      const schoolId = await getAssignedSchoolId(req.user.id)
+      if (!validId(schoolId)) {
+        return res.status(403).json({ message: 'Your School Admin account is not assigned to a school.' })
+      }
+      if (Number(target[0].schoolId) !== Number(schoolId)) {
+        return res.status(404).json({ message: 'User not found in your assigned school.' })
+      }
+      await pool.execute(
+        'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ? AND school_id = ?',
+        [id, schoolId]
+      )
+    } else if (req.user.role === 'Super Admin') {
+      await pool.execute(
+        'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?',
+        [id]
+      )
+    } else {
+      return res.status(403).json({ message: 'Administrator access required.' })
     }
-    const [result] = await pool.execute(
-      'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?',
-      [id]
-    )
-    if (!result.affectedRows) return res.status(404).json({ message: 'User not found.' })
     res.json({ message: 'Account unlocked.' })
   } catch (error) { next(error) }
 }

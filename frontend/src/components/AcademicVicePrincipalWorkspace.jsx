@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import { BookOpen, CalendarDays, GraduationCap, ListPlus, Save, Trash2, Users } from 'lucide-react'
+import { BookOpen, CalendarDays, ChevronDown, GraduationCap, ListPlus, Save, Trash2, Users } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { toastApiError } from '../utils/toast.jsx'
 import { readSessionToken } from '../pages/LoginPage.jsx'
 import { useTranslation } from '../i18n/I18nContext.jsx'
 
@@ -24,8 +25,7 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [showAllTeachers, setShowAllTeachers] = useState(false)
-  const [showAllSubjectTeachers, setShowAllSubjectTeachers] = useState(false)
-  const [teacherSearch, setTeacherSearch] = useState({})
+  const [showSubjectAssignments, setShowSubjectAssignments] = useState(false)
   const [curriculumForm, setCurriculumForm] = useState({
     subjectName: '', department: '', weeklyPeriods: '4',
   })
@@ -85,10 +85,23 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
         { teacherId: teacherId || null },
         authConfig(),
       )
+      const assignedTeacher = teachers.find((teacher) => String(teacher.id) === String(teacherId))
+      setWorkspace((current) => current && ({
+        ...current,
+        subjectSlots: current.subjectSlots.map((subject) => (
+          Number(subject.subjectId) === Number(slot.subjectId)
+            ? {
+              ...subject,
+              teacherId: teacherId || null,
+              teacherName: assignedTeacher?.name || null,
+            }
+            : subject
+        )),
+      }))
       toast.success(t(teacherId ? 'Subject teacher assigned.' : 'Subject assignment removed.'))
       await load(grade, sectionId)
     } catch (error) {
-      toast.error(t(error.response?.data?.message || 'Unable to save the subject teacher assignment.'))
+      toastApiError(error, 'Unable to save the subject teacher assignment.', t)
     } finally {
       setBusy('')
     }
@@ -125,7 +138,7 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
       setCurriculumForm({ subjectName: '', department: '', weeklyPeriods: '4' })
       await load(grade, sectionId)
     } catch (error) {
-      toast.error(t(error.response?.data?.message || 'Unable to save the curriculum subject.'))
+      toastApiError(error, 'Unable to save the curriculum subject.', t)
     } finally {
       setBusy('')
     }
@@ -154,15 +167,12 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
   }
 
   const getTeacherOptions = (slot) => {
-    const eligible = showAllSubjectTeachers
-      ? teachers
-      : teachers.filter((teacher) => matchesSubjectDepartment(teacher, slot))
+    const matchingTeachers = teachers.filter((teacher) => matchesSubjectDepartment(teacher, slot))
+    const eligible = matchingTeachers.length ? matchingTeachers : teachers
     const assignedTeacher = teachers.find((teacher) => Number(teacher.id) === Number(slot.teacherId))
-    const candidates = assignedTeacher && !eligible.some((teacher) => Number(teacher.id) === Number(assignedTeacher.id))
+    return assignedTeacher && !eligible.some((teacher) => Number(teacher.id) === Number(assignedTeacher.id))
       ? [...eligible, assignedTeacher]
       : eligible
-    const search = (teacherSearch[slot.subjectId] || '').toLowerCase()
-    return candidates.filter((teacher) => `${teacher.name} ${teacher.specialization || ''}`.toLowerCase().includes(search))
   }
 
   const isOverview = view === 'overview'
@@ -188,6 +198,7 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
             setGrade(event.target.value)
             const first = sections.find((section) => section.gradeLevel === event.target.value)
             setSectionId(first ? String(first.id) : '')
+            setShowSubjectAssignments(false)
           }} className={inputClass}>
             {grades.map((item) => <option key={item} value={item}>{t(item)}</option>)}
           </select>
@@ -219,7 +230,10 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
           </div>
           : <div className="space-y-4">
             {!isWorkload && <label className="block max-w-sm text-sm font-medium text-slate-700">{t('Section')}
-              <select value={sectionId} onChange={(event) => setSectionId(event.target.value)} className={inputClass}>
+              <select value={sectionId} onChange={(event) => {
+                setSectionId(event.target.value)
+                setShowSubjectAssignments(false)
+              }} className={inputClass}>
                 <option value="">{t('Select a section')}</option>
                 {gradeSections.map((section) => <option key={section.id} value={section.id}>{t(section.sectionName)}</option>)}
               </select>
@@ -253,47 +267,75 @@ export default function AcademicVicePrincipalWorkspace({ view = 'overview' }) {
                   </div>
                 </article>}
 
-                {!isWorkload && !isHomeroom && <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
+                {!isWorkload && !isHomeroom && <button
+                  type="button"
+                  aria-expanded={showSubjectAssignments}
+                  aria-controls="curriculum-subject-assignments"
+                  onClick={() => setShowSubjectAssignments((current) => !current)}
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-primary-800 px-4 text-sm font-semibold text-white hover:bg-primary-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+                >
+                  {t(showSubjectAssignments ? 'Hide Subject Assignments' : 'Load Subject Assignments')}
+                  <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${showSubjectAssignments ? 'rotate-180' : ''}`} />
+                </button>}
+
+                {!isWorkload && !isHomeroom && <div
+                  id="curriculum-subject-assignments"
+                  aria-hidden={!showSubjectAssignments}
+                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${showSubjectAssignments ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+                >
+                  <div inert={!showSubjectAssignments} className="min-h-0 overflow-hidden">
+                    <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4"><div><h2 className="font-bold text-slate-900">{t('Curriculum subject assignments')}</h2>
                     <p className="mt-1 text-sm text-slate-500">{t('Teacher weekly loads include assignments across every section in the active academic year. Maximum: {limit} periods.', { limit: workspace?.maxWeeklyPeriods || 24 })}</p>
                     <p className="mt-1 text-xs text-slate-500">{t('Default subjects use 4 periods per week; adjust them to match your school curriculum.')}</p>
-                  </div><button type="button" disabled={busy !== ''} onClick={initializeCurriculum} className="inline-flex h-9 items-center gap-2 rounded-md border border-primary-200 px-3 text-sm font-semibold text-primary-800 disabled:opacity-50"><ListPlus className="h-4 w-4" />{t(busy === 'curriculum-init' ? 'Initializing…' : 'Initialize Grades 9–12 subjects')}</button></div>
-                  <label className="flex items-center gap-2 border-b border-slate-100 px-4 py-2 text-sm text-slate-600"><input type="checkbox" checked={showAllSubjectTeachers} onChange={(event) => setShowAllSubjectTeachers(event.target.checked)} />{t('Show all active teachers instead of department matches')}</label>
-                  <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">{t('Subject')}</th><th className="px-4 py-3">{t('Weekly Periods')}</th><th className="px-4 py-3">{t('Teacher')}</th><th className="px-4 py-3">{t('Assignment')}</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100">{subjectSlots.map((slot) => {
-                      const options = getTeacherOptions(slot)
-                      const hasSpecializationMatch = teachers.some((teacher) => matchesSubjectDepartment(teacher, slot))
-                      return <tr key={slot.subjectId}>
-                        <td className="px-4 py-3 font-semibold text-slate-900">{t(slot.name)}{slot.department && <span className="block text-xs font-normal text-slate-500">{t(slot.department)}</span>}</td>
-                        <td className="px-4 py-3 tabular-nums">{slot.weeklyPeriods}</td>
-                        <td className="px-4 py-3">
-                          <input type="search" value={teacherSearch[slot.subjectId] || ''} onChange={(event) => setTeacherSearch((current) => ({ ...current, [slot.subjectId]: event.target.value }))} placeholder={t('Search teachers')} className="mb-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" />
-                          <div className="flex items-center gap-2">
-                            <select disabled={busy === `subject-${slot.subjectId}`} value={slot.teacherId || ''} onChange={(event) => assignSubject(slot, event.target.value)} className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-sm">
-                              <option value="">{t('Unassigned')}</option>
-                              {options.map((teacher) => <option key={teacher.id} value={teacher.id}>
-                                {teacher.name}{teacher.specialization ? ` (${teacher.specialization})` : ''} - {teacher.currentPeriods}/{workspace?.maxWeeklyPeriods || 24} {t('periods')}
-                              </option>)}
-                            </select>
-                            {slot.teacherId && <button type="button" disabled={busy === `subject-${slot.subjectId}`} onClick={() => assignSubject(slot, '')} aria-label={`${t('Clear assignment for')} ${t(slot.name)}`} title={t('Clear assignment')} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>}
-                          </div>
-                          {!hasSpecializationMatch && !showAllSubjectTeachers && <p className="mt-1 text-xs text-amber-700">{t('No active teachers match this subject department. Enable all active teachers to see other options.')}</p>}
-                        </td>
-                        <td className="px-4 py-3">{slot.teacherName || t('Unassigned')}</td>
-                      </tr>
-                    })}
-                      {!subjectSlots.length && <tr><td colSpan="4" className="px-4 py-8 text-center text-slate-500">{t('No curriculum subjects are configured for this grade. Add a subject below to create its curriculum slot.')}</td></tr>}
-                    </tbody>
-                  </table></div>
-                  <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">{t('Teacher changes save automatically when selected. Clearing an assignment frees the teacher’s periods immediately.')}</p>
-                  <form onSubmit={saveCurriculumSubject} className="grid gap-3 border-t border-slate-200 p-4 sm:grid-cols-4">
+                  </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button type="button" disabled={busy !== ''} onClick={initializeCurriculum} className="inline-flex h-9 items-center gap-2 rounded-md border border-primary-200 px-3 text-sm font-semibold text-primary-800 disabled:opacity-50"><ListPlus className="h-4 w-4" />{t(busy === 'curriculum-init' ? 'Initializing…' : 'Initialize Grades 9–12 subjects')}</button>
+                    </div>
+                  </div>
+                  <form onSubmit={saveCurriculumSubject} className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-4">
                     <label className="text-sm font-medium text-slate-700">{t('Add curriculum subject')}<input required maxLength={100} value={curriculumForm.subjectName} onChange={(event) => setCurriculumForm((current) => ({ ...current, subjectName: event.target.value }))} className={inputClass} /></label>
                     <label className="text-sm font-medium text-slate-700">{t('Department / Specialization')}<input maxLength={100} value={curriculumForm.department} onChange={(event) => setCurriculumForm((current) => ({ ...current, department: event.target.value }))} className={inputClass} /></label>
                     <label className="text-sm font-medium text-slate-700">{t('Weekly Periods')}<input required type="number" min="1" max="40" value={curriculumForm.weeklyPeriods} onChange={(event) => setCurriculumForm((current) => ({ ...current, weeklyPeriods: event.target.value }))} className={inputClass} /></label>
                     <button disabled={busy === 'curriculum'} className="mt-6 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary-800 px-3 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" />{t(busy === 'curriculum' ? 'Saving…' : 'Save Curriculum')}</button>
                   </form>
-                </article>}
+                  <div id="curriculum-subject-details" className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">{t('Subject')}</th><th className="px-4 py-3">{t('Weekly Periods')}</th><th className="px-4 py-3">{t('Teacher')}</th><th className="px-4 py-3">{t('Assignment')}</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">{subjectSlots.map((slot) => {
+                      const options = getTeacherOptions(slot)
+                      return <React.Fragment key={slot.subjectId}>
+                        <tr>
+                          <td className="px-4 py-3 font-semibold text-slate-900">{t(slot.name)}</td>
+                          <td className="px-4 py-3 tabular-nums">{slot.weeklyPeriods}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <select disabled={busy === `subject-${slot.subjectId}`} value={slot.teacherId || ''} onChange={(event) => assignSubject(slot, event.target.value)} className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-sm">
+                                <option value="">{t('Unassigned')}</option>
+                                {options.map((teacher) => <option key={teacher.id} value={teacher.id}>
+                                  {teacher.name}{teacher.specialization ? ` (${teacher.specialization})` : ''} - {teacher.currentPeriods}/{workspace?.maxWeeklyPeriods || 24} {t('periods')}
+                                </option>)}
+                              </select>
+                              {slot.teacherId && <button type="button" disabled={busy === `subject-${slot.subjectId}`} onClick={() => assignSubject(slot, '')} aria-label={`${t('Clear assignment for')} ${t(slot.name)}`} title={t('Clear assignment')} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${slot.teacherName ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {slot.teacherName || t('Unassigned')}
+                            </span>
+                          </td>
+                        </tr>
+                        {slot.department && <tr>
+                          <td colSpan="4" className="px-4 pb-3 pt-0 text-xs text-slate-500">{t(slot.department)}</td>
+                        </tr>}
+                      </React.Fragment>
+                    })}
+                      {!subjectSlots.length && <tr><td colSpan="4" className="px-4 py-8 text-center text-slate-500">{t('No curriculum subjects are configured for this grade. Add a subject below to create its curriculum slot.')}</td></tr>}
+                    </tbody>
+                  </table>                  </div>
+                  <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">{t('Teacher changes save automatically when selected. Clearing an assignment frees the teacher’s periods immediately.')}</p>
+                    </article>
+                  </div>
+                </div>}
 
                 {isWorkload && <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
                   <div className="border-b border-slate-200 px-4 py-4"><h2 className="font-bold text-slate-900">{t('Weekly teacher workload')}</h2><p className="mt-1 text-sm text-slate-500">{t('Teachers near the maximum are highlighted. School limit: {limit} periods/week.', { limit: workspace?.maxWeeklyPeriods || 24 })}</p></div>

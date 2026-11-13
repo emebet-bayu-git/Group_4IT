@@ -22,6 +22,7 @@ import {
   listTeacherClasses,
   publishRegistrarSectionSubmission,
   saveTeacherClassGrades,
+  submitTeacherClassGrades,
   submitTeacherAdvisorSectionResults,
 } from '../controllers/teacherController.js'
 import { authenticateUser, authorizeRoles, requireSchoolAdmin } from '../middleware/authMiddleware.js'
@@ -83,6 +84,7 @@ router.get('/teacher/advisor/sections/:id/results', authenticateUser, authorizeR
 router.post('/teacher/advisor/sections/:id/submit', authenticateUser, authorizeRoles('Teacher'), submitTeacherAdvisorSectionResults)
 router.get('/teacher/classes/:id/grades', authenticateUser, authorizeRoles('Teacher'), getTeacherClassGrades)
 router.put('/teacher/classes/:id/grades', authenticateUser, authorizeRoles('Teacher'), saveTeacherClassGrades)
+router.post('/teacher/classes/:id/submit', authenticateUser, authorizeRoles('Teacher'), submitTeacherClassGrades)
 router.delete('/teacher/classes/:id/grades/:studentId', authenticateUser, authorizeRoles('Teacher'), deleteTeacherClassGrade)
 router.get('/registrar/section-results', authenticateUser, authorizeRoles('Registrar'), listRegistrarSectionSubmissions)
 router.get('/registrar/section-results/:id', authenticateUser, authorizeRoles('Registrar'), getRegistrarSectionSubmission)

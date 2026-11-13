@@ -22,11 +22,26 @@
 
 @layer utilities {
   .scrollbar-subtle { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  .registrar-print-only { display: none; }
 }
 
 @media print {
   @page { size: A4; margin: 12mm; }
   body { background: white !important; }
+  body * { visibility: hidden !important; }
+  .registrar-print-only,
+  .registrar-print-only * { visibility: visible !important; }
+  .registrar-print-only {
+    display: block !important;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  .registrar-grade-slip { break-after: page; page-break-after: always; }
+  .registrar-grade-slip:last-child { break-after: auto; page-break-after: auto; }
+  .registrar-grade-slip-excluded { display: none !important; }
+  .registrar-grade-slip,
+  .registrar-grade-slip * { color: #0f172a !important; }
   aside, nav, .dashboard-topbar, .dashboard-welcome, .app-footer, .report-actions, .transcript-actions, .report-online-only { display: none !important; }
   .report-document header, .transcript-document header { display: flex !important; }
   main, main > div { margin: 0 !important; padding: 0 !important; max-width: none !important; }

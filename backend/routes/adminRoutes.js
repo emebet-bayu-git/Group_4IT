@@ -141,7 +141,7 @@ router.delete('/staff/:id', authorizeRoles('School Admin'), deleteSchoolStaffMem
 router.post('/users/:id/assign-role', authorizeRoles('School Admin'), assignStaffLeadershipRole)
 router.patch('/users/:id', authorizeRoles('Super Admin', 'School Admin'), updateUser)
 router.post('/users/:id/reset-password', requireSystemAdmin('users'), resetUserPassword)
-router.post('/users/:id/unlock', requireSystemAdmin('users'), unlockUser)
+router.post('/users/:id/unlock', authorizeRoles('Super Admin', 'School Admin'), unlockUser)
 router.get('/setup', authorizeRoles('Super Admin', 'School Admin'), getSetup)
 router.put('/setup', authorizeRoles('Super Admin', 'School Admin'), saveSetup)
 router.post('/school-assets', authorizeRoles('Super Admin', 'School Admin'), assetUpload.single('asset'), uploadSchoolAsset)

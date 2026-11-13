@@ -52,6 +52,19 @@ export default function SchoolStaffOversightView() {
     }
   }
 
+  const unlockStaff = async (member) => {
+    setBusy(true)
+    try {
+      await axios.post(`/api/admin/users/${member.id}/unlock`, {}, { headers: tokenHeaders() })
+      toast.success(t('Account unlocked.'))
+      await loadStaff()
+    } catch (requestError) {
+      toast.error(t(requestError.response?.data?.message || 'Unable to unlock this account.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => { loadStaff() }, [])
   const filteredStaff = useMemo(() => staff.filter((member) => {
     const matchesText = `${member.name} ${member.email} ${member.department || ''} ${member.subjects || ''} ${member.woredaEmployeeId || ''}`.toLowerCase().includes(query.toLowerCase())
@@ -142,8 +155,13 @@ export default function SchoolStaffOversightView() {
               : filteredStaff.length ? filteredStaff.map((member) => <tr key={member.id}>
                 <td className="px-5 py-4"><span className="block font-semibold text-slate-900">{member.name}</span><span className="text-xs text-slate-500">{t('ID {id}', { id: member.id })} · {member.username || member.email}</span></td>
                 <td className="px-4 py-4">{roleLabel(member.role, t)}</td><td className="px-4 py-4">{member.department || '—'}</td><td className="max-w-xs truncate px-4 py-4">{member.subjects || '—'}</td>
-                <td className="px-4 py-4"><span className={member.isActive ? 'font-medium text-emerald-700' : 'font-medium text-slate-500'}>{t(member.isActive ? 'Active' : 'Inactive')}</span></td>
+                <td className="px-4 py-4">
+                  <span className={member.isActive ? 'font-medium text-emerald-700' : 'font-medium text-slate-500'}>{t(member.isActive ? 'Active' : 'Inactive')}</span>
+                  {member.lockedUntil && <span className="mt-1 block text-xs text-amber-700">{t('Locked until {date}', { date: new Date(member.lockedUntil).toLocaleString() })}</span>}
+                  {Number(member.failedLoginAttempts) > 0 && <span className="mt-1 block text-xs text-amber-700">{t('Failed sign-in attempts: {count}', { count: member.failedLoginAttempts })}</span>}
+                </td>
                 <td className="px-5 py-4"><div className="flex justify-end gap-1">
+                  {(Number(member.failedLoginAttempts) > 0 || member.lockedUntil) && <button type="button" disabled={busy} onClick={() => unlockStaff(member)} title={t('Unlock')} className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50">{t('Unlock')}</button>}
                   <button type="button" disabled={busy} onClick={() => viewDetails(member)} title={t('View staff details')} aria-label={t('View {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-primary-50 hover:text-primary-700 disabled:opacity-50"><Eye className="h-4 w-4" /></button>
                   <button type="button" disabled={busy} onClick={() => openEdit(member)} title={t('Edit staff member')} aria-label={t('Edit {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-warning-50 hover:text-warning-700 disabled:opacity-50"><Pencil className="h-4 w-4" /></button>
                   <button type="button" disabled={busy} onClick={() => setDeleteStaff(member)} title={t('Permanently delete staff member')} aria-label={t('Delete {name}', { name: member.name })} className="rounded-md p-2 text-slate-500 hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>

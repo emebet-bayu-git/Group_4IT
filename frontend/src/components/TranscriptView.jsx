@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 import { ArrowLeft, ChevronDown, Download, GraduationCap } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { toastApiError } from '../utils/toast.jsx'
 import Button from './ui/Button.jsx'
 import { readSessionToken } from '../pages/LoginPage.jsx'
 import { SchoolAddress, SchoolMark, useSchoolProfile } from './SchoolIdentity.jsx'
@@ -49,7 +50,7 @@ export default function TranscriptView({ onBack, registrarMode = false }) {
         setAccessError(error.response?.data?.message || '')
         setCanMarkTransferredOut(error.response?.status === 403 && registrarMode)
         if (error.response?.status !== 404) {
-          toast.error(t(error.response?.data?.message || 'Unable to load archived academic records.'))
+          toastApiError(error, 'Unable to load archived academic records.', t)
         }
       })
       .finally(() => { if (active) setLoading(false) })

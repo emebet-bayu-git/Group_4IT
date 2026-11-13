@@ -43,6 +43,7 @@ export async function listTeacherClasses(req, res, next) {
               section.section_name AS sectionName, assignment.subject,
               COALESCE(section.homeroom_teacher_id = assignment.teacher_id, FALSE) AS isHomeroomTeacher,
               submission.status AS submissionStatus,
+              subjectSubmission.status AS subjectSubmissionStatus,
               COUNT(DISTINCT studentAccount.id) AS studentCount
        FROM teacher_class_assignments assignment
        LEFT JOIN school_sections section ON section.id = assignment.section_id
@@ -56,6 +57,8 @@ export async function listTeacherClasses(req, res, next) {
          AND activeAssignment.academic_year_id = ?
        LEFT JOIN section_result_submissions submission ON submission.section_id = section.id
          AND submission.academic_year_id = ? AND submission.term_id = ?
+       LEFT JOIN teacher_subject_result_submissions subjectSubmission ON subjectSubmission.assignment_id = assignment.id
+         AND subjectSubmission.academic_year_id = ? AND subjectSubmission.term_id = ?
        LEFT JOIN students student ON student.school_id = assignment.school_id
          AND COALESCE(student.grade, student.grade_level) = section.grade_level
          AND student.section = section.section_name AND student.status = 'Active'
@@ -65,9 +68,10 @@ export async function listTeacherClasses(req, res, next) {
          AND studentAccount.role = 'Student' AND studentAccount.is_active = TRUE
        WHERE assignment.teacher_id = ? AND assignment.school_id = ? AND section.id IS NOT NULL
        GROUP BY assignment.id, section.id, section.grade_level, section.section_name,
-         assignment.subject, section.homeroom_teacher_id, submission.status
+         assignment.subject, section.homeroom_teacher_id, submission.status, subjectSubmission.status
        ORDER BY section.grade_level, section.section_name, assignment.subject`,
       [context.period?.academicYearId ?? null, context.period?.academicYearId ?? null, context.period?.termId ?? null,
+        context.period?.academicYearId ?? null, context.period?.termId ?? null,
         context.period?.academicYearId ?? null,
         req.user.id, context.schoolId]
     )
@@ -103,7 +107,8 @@ export async function getTeacherClassGrades(req, res, next) {
       `SELECT assignment.id, section.id AS sectionId, section.grade_level AS gradeLevel,
               section.section_name AS sectionName, assignment.subject,
               homeroom.full_name AS homeroomTeacherName,
-              submission.status AS submissionStatus
+              submission.status AS submissionStatus,
+              subjectSubmission.status AS subjectSubmissionStatus
        FROM teacher_class_assignments assignment
        JOIN school_sections section ON section.id = assignment.section_id AND section.is_active = TRUE
        LEFT JOIN users homeroom ON homeroom.id = section.homeroom_teacher_id
@@ -116,13 +121,16 @@ export async function getTeacherClassGrades(req, res, next) {
        AND activeAssignment.academic_year_id = ?
        LEFT JOIN section_result_submissions submission ON submission.section_id = section.id
          AND submission.academic_year_id = ? AND submission.term_id = ?
+       LEFT JOIN teacher_subject_result_submissions subjectSubmission ON subjectSubmission.assignment_id = assignment.id
+         AND subjectSubmission.academic_year_id = ? AND subjectSubmission.term_id = ?
        WHERE assignment.id = ? AND assignment.teacher_id = ? AND assignment.school_id = ?
        LIMIT 1`,
       [context.period?.academicYearId ?? null, context.period?.academicYearId ?? null, context.period?.termId ?? null,
+        context.period?.academicYearId ?? null, context.period?.termId ?? null,
         req.params.id, req.user.id, context.schoolId]
     )
     if (!classAssignment) return res.status(404).json({ message: 'Assigned class not found.' })
-    classAssignment.locked = Boolean(classAssignment.submissionStatus)
+    classAssignment.locked = Boolean(classAssignment.submissionStatus || classAssignment.subjectSubmissionStatus)
     const [students] = await pool.execute(
       `SELECT student.id AS id, student.full_name AS name,
               COALESCE(student.grade, student.grade_level) AS gradeLevel, student.section,
@@ -148,6 +156,105 @@ export async function getTeacherClassGrades(req, res, next) {
   } catch (error) {
     console.error('Unable to load teacher class roster and grades:', error.message)
     return res.status(503).json({ message: 'Unable to load this assigned class. The teacher workspace database setup may be incomplete.' })
+  }
+}
+
+export async function submitTeacherClassGrades(req, res, next) {
+  if (!validId(req.params.id)) return res.status(400).json({ message: 'Provide a valid assigned class ID.' })
+  let connection
+  try {
+    const context = await getTeacherContext(req.user.id)
+    if (!context) return res.status(403).json({ message: 'Your teacher account is not assigned to a school.' })
+    if (!context.period) return res.status(409).json({ message: 'An active academic year and term must be configured.' })
+    const [[classAssignment]] = await pool.execute(
+      `SELECT assignment.id, section.id AS sectionId, section.grade_level AS gradeLevel,
+              section.section_name AS sectionName, assignedSubject.id AS subjectId
+       FROM teacher_class_assignments assignment
+       JOIN school_sections section ON section.id = assignment.section_id AND section.is_active = TRUE
+       JOIN school_subjects assignedSubject ON assignedSubject.school_id = assignment.school_id
+         AND assignedSubject.name = assignment.subject
+       JOIN section_subject_teachers activeAssignment ON activeAssignment.school_id = assignment.school_id
+         AND activeAssignment.section_id = assignment.section_id
+         AND activeAssignment.subject_id = assignedSubject.id
+         AND activeAssignment.teacher_id = assignment.teacher_id
+         AND activeAssignment.academic_year_id = ?
+       WHERE assignment.id = ? AND assignment.teacher_id = ? AND assignment.school_id = ?
+       LIMIT 1`,
+      [context.period.academicYearId, req.params.id, req.user.id, context.schoolId]
+    )
+    if (!classAssignment) return res.status(404).json({ message: 'Assigned class not found.' })
+    connection = await pool.getConnection()
+    await connection.beginTransaction()
+    await connection.execute(
+      'SELECT id FROM school_sections WHERE id = ? AND school_id = ? FOR UPDATE',
+      [classAssignment.sectionId, context.schoolId]
+    )
+    const [[currentAssignment]] = await connection.execute(
+      `SELECT id FROM section_subject_teachers
+       WHERE school_id = ? AND academic_year_id = ? AND section_id = ?
+         AND subject_id = ? AND teacher_id = ? FOR UPDATE`,
+      [context.schoolId, context.period.academicYearId, classAssignment.sectionId,
+        classAssignment.subjectId, req.user.id]
+    )
+    if (!currentAssignment) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'This subject is no longer assigned to you for the active academic year.' })
+    }
+    const [[sectionSubmission]] = await connection.execute(
+      `SELECT id FROM section_result_submissions
+       WHERE section_id = ? AND academic_year_id = ? AND term_id = ? LIMIT 1`,
+      [classAssignment.sectionId, context.period.academicYearId, context.period.termId]
+    )
+    if (sectionSubmission) {
+      await connection.rollback()
+      return res.status(423).json({ message: 'These section results have already been submitted to the Registrar and are locked.' })
+    }
+    const [[existingSubmission]] = await connection.execute(
+      `SELECT id FROM teacher_subject_result_submissions
+       WHERE assignment_id = ? AND academic_year_id = ? AND term_id = ? LIMIT 1`,
+      [classAssignment.id, context.period.academicYearId, context.period.termId]
+    )
+    if (existingSubmission) {
+      await connection.rollback()
+      return res.status(409).json({ message: 'These subject grades have already been submitted to the homeroom teacher.' })
+    }
+    const [[gradeCounts]] = await connection.execute(
+      `SELECT COUNT(DISTINCT student.id) AS studentCount,
+              COUNT(DISTINCT CASE WHEN grade.student_id IS NOT NULL THEN student.id END) AS gradedCount
+       FROM students student
+       JOIN users account ON account.id = student.user_id
+         AND account.role = 'Student' AND account.is_active = TRUE
+       LEFT JOIN student_grades grade ON grade.assignment_id = ?
+         AND grade.student_id = student.id
+         AND grade.academic_year_id = ? AND grade.term_id = ?
+       WHERE student.school_id = ? AND student.status = 'Active'
+         AND student.section_status = 'Confirmed / Enrolled'
+         AND student.enrollment_year_id = ?
+         AND COALESCE(student.grade, student.grade_level) = ?
+         AND student.section = ?`,
+      [classAssignment.id, context.period.academicYearId, context.period.termId,
+        context.schoolId, context.period.academicYearId,
+        classAssignment.gradeLevel, classAssignment.sectionName]
+    )
+    if (!Number(gradeCounts.studentCount) || Number(gradeCounts.studentCount) !== Number(gradeCounts.gradedCount)) {
+      await connection.rollback()
+      return res.status(409).json({ message: 'Enter grades for every active student before submitting this subject to the homeroom teacher.' })
+    }
+    await connection.execute(
+      `INSERT INTO teacher_subject_result_submissions
+        (assignment_id, section_id, school_id, academic_year_id, term_id, submitted_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [classAssignment.id, classAssignment.sectionId, context.schoolId,
+        context.period.academicYearId, context.period.termId, req.user.id]
+    )
+    await connection.commit()
+    return res.json({ message: 'Subject grades submitted to the homeroom teacher.', status: 'submitted_to_homeroom' })
+  } catch (error) {
+    if (connection) await connection.rollback()
+    console.error('Unable to submit teacher subject grades:', error.message)
+    return next(error)
+  } finally {
+    connection?.release()
   }
 }
 
@@ -181,6 +288,7 @@ async function loadSectionResultBundle(executor, sectionId, schoolId, academicYe
   const [subjects] = await executor.execute(
     `SELECT assignment.id AS assignmentId, assignment.subject,
             teacher.id AS teacherId, teacher.full_name AS teacherName,
+            subjectSubmission.status AS submissionStatus,
             COUNT(DISTINCT studentAccount.id) AS studentCount,
             COUNT(DISTINCT CASE WHEN studentAccount.id IS NOT NULL THEN grade.student_id END) AS gradedCount
      FROM teacher_class_assignments assignment
@@ -203,10 +311,13 @@ async function loadSectionResultBundle(executor, sectionId, schoolId, academicYe
      LEFT JOIN student_grades grade ON grade.assignment_id = assignment.id
        AND grade.student_id = student.id AND grade.academic_year_id = ?
        AND grade.term_id = ?
+     LEFT JOIN teacher_subject_result_submissions subjectSubmission ON subjectSubmission.assignment_id = assignment.id
+       AND subjectSubmission.academic_year_id = ? AND subjectSubmission.term_id = ?
      WHERE assignment.section_id = ? AND assignment.school_id = ?
-     GROUP BY assignment.id, assignment.subject, teacher.id, teacher.full_name
+     GROUP BY assignment.id, assignment.subject, teacher.id, teacher.full_name, subjectSubmission.status
      ORDER BY assignment.subject, teacher.full_name`,
-    [academicYearId, section.gradeLevel, section.sectionName, academicYearId, academicYearId, termId, sectionId, schoolId]
+    [academicYearId, section.gradeLevel, section.sectionName, academicYearId, academicYearId, termId,
+      academicYearId, termId, sectionId, schoolId]
   )
   const subjectIds = subjects.map(({ assignmentId }) => assignmentId)
   let grades = []
@@ -230,6 +341,7 @@ async function loadSectionResultBundle(executor, sectionId, schoolId, academicYe
     ...subject,
     studentCount: Number(subject.studentCount),
     gradedCount: Number(subject.gradedCount),
+    submittedToHomeroom: subject.submissionStatus === 'submitted_to_homeroom',
     complete: students.length > 0
       && Number(subject.studentCount) === students.length
       && Number(subject.gradedCount) === students.length,
@@ -250,6 +362,8 @@ async function loadSectionResultBundle(executor, sectionId, schoolId, academicYe
     subjects: normalizedSubjects,
     complete: students.length > 0 && normalizedSubjects.length > 0
       && normalizedSubjects.every((subject) => subject.complete),
+    readyToForward: students.length > 0 && normalizedSubjects.length > 0
+      && normalizedSubjects.every((subject) => subject.complete && subject.submittedToHomeroom),
   }
 }
 
@@ -346,19 +460,19 @@ export async function submitTeacherAdvisorSectionResults(req, res, next) {
       connection, section.id, context.schoolId,
       context.period.academicYearId, context.period.termId
     )
-    if (!bundle.complete) {
+    if (!bundle.readyToForward) {
       await connection.rollback()
-      return res.status(409).json({ message: 'Every subject teacher must submit grades for every active student before section submission.' })
+      return res.status(409).json({ message: 'Every subject teacher must submit complete grades to the homeroom teacher before forwarding section results to the Registrar.' })
     }
     await connection.execute(
       `INSERT INTO section_result_submissions
-        (section_id, school_id, academic_year_id, term_id, submitted_by)
-       VALUES (?, ?, ?, ?, ?)`,
+        (section_id, school_id, academic_year_id, term_id, status, submitted_by)
+       VALUES (?, ?, ?, ?, 'awaiting_principal_approval', ?)`,
       [section.id, context.schoolId, context.period.academicYearId,
         context.period.termId, req.user.id]
     )
     await connection.commit()
-    return res.json({ message: 'Section results submitted to the Registrar.', status: 'submitted' })
+    return res.json({ message: 'Section results submitted for principal approval.', status: 'awaiting_principal_approval' })
   } catch (error) {
     if (connection) await connection.rollback()
     console.error('Unable to submit homeroom section results:', error.message)
@@ -463,7 +577,7 @@ export async function approveLeadershipSectionSubmission(req, res, next) {
       await connection.rollback()
       return res.status(404).json({ message: 'Submitted section results not found.' })
     }
-    if (submission.status !== 'submitted') {
+    if (submission.status !== 'awaiting_principal_approval') {
       await connection.rollback()
       return res.status(409).json({ message: 'These results have already been approved or archived.' })
     }
@@ -506,7 +620,7 @@ export async function approveLeadershipSectionSubmission(req, res, next) {
       `UPDATE section_result_submissions
        SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP,
            approval_stamp_path = ?, approval_signature_path = ?, approval_name = ?
-       WHERE id = ? AND school_id = ? AND status = 'submitted'`,
+       WHERE id = ? AND school_id = ? AND status = 'awaiting_principal_approval'`,
       [req.user.id, school.stampPath, school.signaturePath, school.principalName,
         submission.id, schoolId]
     )
@@ -663,35 +777,83 @@ export async function getRegistrarSectionSubmission(req, res, next) {
     if (!submission) return res.status(404).json({ message: 'Submitted section results not found.' })
     if (submission.status === 'published') {
       const [archivedRows] = await pool.execute(
-        `SELECT student_id AS studentId, student_name AS name,
-                assignment_id AS assignmentId, subject,
-                assessment_40 AS assessment40, final_60 AS final60, total_100 AS total100
-         FROM permanent_academic_records
-         WHERE school_id = ? AND source_submission_id = ?
-         ORDER BY student_name, subject`,
+        `SELECT archived.student_id AS studentId, archived.student_name AS name,
+                archived.student_number AS studentNumber, archived.grade_level AS gradeLevel,
+                archived.section_name AS sectionName, archived.academic_year AS academicYear,
+                archived.semester, archived.assessment_40 AS assessment40,
+                archived.final_60 AS final60, archived.total_100 AS total100,
+                archived.grade_point AS gradePoint, archived.sgpa, archived.cgpa,
+                archived.school_name AS schoolName,
+                archived.stamp_path AS stampPath, archived.signature_path AS signaturePath,
+                archived.principal_name AS principalName,
+                archived.homeroom_teacher_name AS homeroomTeacherName,
+                archived.approved_at AS approvedAt, archived.archived_at AS archivedAt,
+                archiveUser.full_name AS archivedByName,
+                archived.assignment_id AS assignmentId, archived.subject,
+                archived.source_submission_id AS sourceSubmissionId
+         FROM permanent_academic_records archived
+         LEFT JOIN users archiveUser ON archiveUser.id = archived.archived_by
+         WHERE archived.school_id = ?
+           AND archived.source_submission_id = ?
+         ORDER BY archived.student_name, archived.subject`,
         [schoolId, submission.id]
       )
+      if (!archivedRows.length) {
+        return res.status(409).json({ message: 'This section is marked archived, but its permanent grade records are missing.' })
+      }
       const subjectsById = new Map()
       const studentsById = new Map()
       for (const row of archivedRows) {
         const assignmentId = Number(row.assignmentId)
         subjectsById.set(assignmentId, { assignmentId, subject: row.subject })
         if (!studentsById.has(Number(row.studentId))) {
-          studentsById.set(Number(row.studentId), { id: Number(row.studentId), name: row.name, results: [] })
+          studentsById.set(Number(row.studentId), {
+            id: Number(row.studentId),
+            name: row.name,
+            studentNumber: row.studentNumber,
+            gradeLevel: row.gradeLevel,
+            sectionName: row.sectionName,
+            academicYear: row.academicYear,
+            semester: row.semester,
+            sgpa: Number(row.sgpa),
+            cgpa: Number(row.cgpa),
+            schoolName: row.schoolName,
+            stampPath: row.stampPath,
+            signaturePath: row.signaturePath,
+            principalName: row.principalName,
+            homeroomTeacherName: row.homeroomTeacherName,
+            approvedAt: row.approvedAt,
+            archivedAt: row.archivedAt,
+            archivedByName: row.archivedByName,
+            results: [],
+          })
         }
         studentsById.get(Number(row.studentId)).results.push({
           assignmentId,
+          subject: row.subject,
           assessment40: Number(row.assessment40),
           final60: Number(row.final60),
           total100: Number(row.total100),
+          gradePoint: Number(row.gradePoint),
         })
       }
+      const firstArchivedRow = archivedRows[0]
       return res.json({
         section: { gradeLevel: submission.gradeLevel, sectionName: submission.sectionName },
         subjects: [...subjectsById.values()],
         students: [...studentsById.values()],
         complete: true,
-        submission,
+        submission: {
+          ...submission,
+          schoolName: firstArchivedRow.schoolName,
+          stampPath: firstArchivedRow.stampPath,
+          signaturePath: firstArchivedRow.signaturePath,
+          principalName: firstArchivedRow.principalName,
+          homeroomTeacherName: firstArchivedRow.homeroomTeacherName,
+          archivedByName: firstArchivedRow.archivedByName,
+          approvedAt: firstArchivedRow.approvedAt,
+          archivedAt: firstArchivedRow.archivedAt,
+        },
       })
     }
     const bundle = await loadSectionResultBundle(
@@ -994,11 +1156,12 @@ export async function markRegistrarStudentTransferredOut(req, res, next) {
   }
 }
 
-export async function publishRegistrarSectionSubmission(req, res, next) {
+export async function publishRegistrarSectionSubmission(req, res) {
   if (!validId(req.params.id)) return res.status(400).json({ message: 'Provide a valid submission ID.' })
   let connection
+  let schoolId
   try {
-    const schoolId = await getRegistrarSchoolId(req.user.id)
+    schoolId = await getRegistrarSchoolId(req.user.id)
     if (!schoolId) return res.status(403).json({ message: 'Your Registrar account is not assigned to a school.' })
     connection = await pool.getConnection()
     await connection.beginTransaction()
@@ -1025,6 +1188,13 @@ export async function publishRegistrarSectionSubmission(req, res, next) {
     if (submission.status !== 'approved') {
       await connection.rollback()
       return res.status(409).json({ message: 'Only principal-approved results can be permanently archived.' })
+    }
+    if (!submission.approvedBy || !submission.approvedAt || !submission.stampPath
+      || !submission.signaturePath || !submission.principalName) {
+      await connection.rollback()
+      return res.status(409).json({
+        message: 'These approved results are missing required official approval details. Contact school leadership before archiving.',
+      })
     }
     const bundle = await loadSectionResultBundle(
       connection, submission.sectionId, schoolId,
@@ -1067,16 +1237,17 @@ export async function publishRegistrarSectionSubmission(req, res, next) {
             (school_id, student_id, student_name, student_number, grade_level, section_name,
              assignment_id, subject, academic_year_id, term_id, academic_year, semester,
              assessment_40, final_60, total_100, grade_point, sgpa, cgpa, school_name,
-             stamp_path, signature_path, principal_name, approved_by, approved_at,
+             stamp_path, signature_path, principal_name, homeroom_teacher_name, approved_by, approved_at,
              source_submission_id, archived_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [schoolId, student.id, student.name, student.studentNumber || null,
             bundle.section.gradeLevel, bundle.section.sectionName, result.assignmentId,
             result.subject, submission.academicYearId, submission.termId,
             submission.academicYear, submission.semester, result.assessment40,
             result.final60, result.total100, result.gradePoint, sgpa, cgpa,
             submission.schoolName, submission.stampPath, submission.signaturePath,
-            submission.principalName, submission.approvedBy, submission.approvedAt,
+            submission.principalName, bundle.section.homeroomTeacherName || null,
+            submission.approvedBy, submission.approvedAt,
             submission.id, req.user.id]
         )
       }
@@ -1163,9 +1334,46 @@ export async function publishRegistrarSectionSubmission(req, res, next) {
       promotedCount,
     })
   } catch (error) {
-    if (connection) await connection.rollback()
-    console.error('Unable to publish Registrar section results:', error.message)
-    return next(error)
+    if (connection) {
+      try {
+        await connection.rollback()
+      } catch (rollbackError) {
+        console.error('Unable to roll back Registrar section archival transaction:', {
+          code: rollbackError.code,
+          errno: rollbackError.errno,
+          sqlState: rollbackError.sqlState,
+          message: rollbackError.message,
+          stack: rollbackError.stack,
+        })
+      }
+    }
+    console.error('Unable to publish Registrar section results:', {
+      submissionId: req.params.id,
+      schoolId,
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      message: error.message,
+      stack: error.stack,
+    })
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        message: 'Some results for this section have already been archived. Refresh the Registrar results list before retrying.',
+      })
+    }
+    if (error.code === 'ER_BAD_FIELD_ERROR' || error.code === 'ER_NO_SUCH_TABLE') {
+      return res.status(503).json({
+        message: 'The results archive is missing a required database update. Please contact your system administrator.',
+      })
+    }
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'PROTOCOL_CONNECTION_LOST') {
+      return res.status(503).json({
+        message: 'The database could not be reached. No results were archived; please try again.',
+      })
+    }
+    return res.status(500).json({
+      message: 'Unable to archive these results. Refresh the results list before retrying or contact your system administrator.',
+    })
   } finally {
     connection?.release()
   }
@@ -1247,6 +1455,15 @@ export async function saveTeacherClassGrades(req, res, next) {
     if (submission) {
       await connection.rollback()
       return res.status(423).json({ message: 'These results have been submitted to the Registrar and are locked.' })
+    }
+    const [[subjectSubmission]] = await connection.execute(
+      `SELECT id FROM teacher_subject_result_submissions
+       WHERE assignment_id = ? AND academic_year_id = ? AND term_id = ? LIMIT 1`,
+      [classAssignment.id, context.period.academicYearId, context.period.termId]
+    )
+    if (subjectSubmission) {
+      await connection.rollback()
+      return res.status(423).json({ message: 'These subject grades have been submitted to the homeroom teacher and are locked.' })
     }
     const [enrolledStudents] = await connection.execute(
       `SELECT student.id AS id
@@ -1340,6 +1557,15 @@ export async function deleteTeacherClassGrade(req, res, next) {
     if (submission) {
       await connection.rollback()
       return res.status(423).json({ message: 'These results have been submitted to the Registrar and are locked.' })
+    }
+    const [[subjectSubmission]] = await connection.execute(
+      `SELECT id FROM teacher_subject_result_submissions
+       WHERE assignment_id = ? AND academic_year_id = ? AND term_id = ? LIMIT 1`,
+      [classAssignment.id, context.period.academicYearId, context.period.termId]
+    )
+    if (subjectSubmission) {
+      await connection.rollback()
+      return res.status(423).json({ message: 'These subject grades have been submitted to the homeroom teacher and are locked.' })
     }
     const [result] = await connection.execute(
       `DELETE FROM student_grades

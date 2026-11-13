@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS section_result_submissions (
   school_id INT NOT NULL,
   academic_year_id INT NOT NULL,
   term_id INT NOT NULL,
-  status ENUM('submitted', 'published') NOT NULL DEFAULT 'submitted',
+  status ENUM('awaiting_principal_approval', 'approved', 'published') NOT NULL DEFAULT 'awaiting_principal_approval',
   submitted_by INT NOT NULL,
   submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   published_by INT NULL,
@@ -277,6 +277,26 @@ CREATE TABLE IF NOT EXISTS section_result_submissions (
   CONSTRAINT fk_section_submission_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE,
   CONSTRAINT fk_section_submission_submitter FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE RESTRICT,
   CONSTRAINT fk_section_submission_publisher FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS teacher_subject_result_submissions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  assignment_id BIGINT NOT NULL,
+  section_id INT NOT NULL,
+  school_id INT NOT NULL,
+  academic_year_id INT NOT NULL,
+  term_id INT NOT NULL,
+  status ENUM('submitted_to_homeroom') NOT NULL DEFAULT 'submitted_to_homeroom',
+  submitted_by INT NOT NULL,
+  submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_teacher_subject_submission_period (assignment_id, academic_year_id, term_id),
+  INDEX idx_teacher_subject_submission_section (section_id, academic_year_id, term_id),
+  CONSTRAINT fk_teacher_subject_submission_assignment FOREIGN KEY (assignment_id) REFERENCES teacher_class_assignments(id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_subject_submission_section FOREIGN KEY (section_id) REFERENCES school_sections(id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_subject_submission_school FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_subject_submission_year FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_subject_submission_term FOREIGN KEY (term_id) REFERENCES academic_terms(id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_subject_submission_teacher FOREIGN KEY (submitted_by) REFERENCES users(id) ON DELETE RESTRICT
 );
 
 DROP PROCEDURE add_column_if_missing;

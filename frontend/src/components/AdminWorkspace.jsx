@@ -408,8 +408,26 @@ export default function AdminWorkspace({ activeTask }) {
                       )
                     })}</ul>
                     : <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{t('Unassigned / No School')}</span>}</td>}
-                  <td className="p-3"><span className={user.isActive ? 'text-emerald-700' : 'text-danger-700'}>{t(user.isActive ? 'Enabled' : 'Disabled')}</span>{user.lockedUntil && <span className="mt-1 block text-xs text-amber-700">{t('Locked until {date}', { date: new Date(user.lockedUntil).toLocaleString() })}</span>}</td>
-                  <td className="space-x-2 p-3">{isSuperAdmin ? protectedDefaultAdmin ? <span className="text-xs font-semibold text-slate-500">{t('Protected')}</span> : <><button disabled={busy} onClick={() => doAction(() => request('patch', `/users/${user.id}`, { isActive: !user.isActive }), 'Account status updated.')} className="rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold">{t(user.isActive ? 'Disable' : 'Enable')}</button><button disabled={busy} onClick={() => doAction(() => request('post', `/users/${user.id}/unlock`), 'Account unlocked.')} className="rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold">{t('Unlock')}</button><ResetPassword user={user} busy={busy} onReset={(password) => doAction(() => request('post', `/users/${user.id}/reset-password`, { password }), 'Password reset and account unlocked.')} /></> : <span className="text-xs text-slate-500">{t('School account')}</span>}</td>
+                  <td className="p-3">
+                    <span className={user.isActive ? 'text-emerald-700' : 'text-danger-700'}>{t(user.isActive ? 'Enabled' : 'Disabled')}</span>
+                    {user.lockedUntil && <span className="mt-1 block text-xs text-amber-700">{t('Locked until {date}', { date: new Date(user.lockedUntil).toLocaleString() })}</span>}
+                    {Number(user.failedLoginAttempts) > 0 && <span className="mt-1 block text-xs text-amber-700">{t('Failed sign-in attempts: {count}', { count: user.failedLoginAttempts })}</span>}
+                  </td>
+                  <td className="space-x-2 p-3">
+                    {isSuperAdmin
+                      ? protectedDefaultAdmin
+                        ? <span className="text-xs font-semibold text-slate-500">{t('Protected')}</span>
+                        : <>
+                          <button disabled={busy} onClick={() => doAction(() => request('patch', `/users/${user.id}`, { isActive: !user.isActive }), 'Account status updated.')} className="rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold">{t(user.isActive ? 'Disable' : 'Enable')}</button>
+                          {(Number(user.failedLoginAttempts) > 0 || user.lockedUntil) && <button disabled={busy} onClick={() => doAction(() => request('post', `/users/${user.id}/unlock`), 'Account unlocked.')} className="rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold">{t('Unlock')}</button>}
+                          <ResetPassword user={user} busy={busy} onReset={(password) => doAction(() => request('post', `/users/${user.id}/reset-password`, { password }), 'Password reset and account unlocked.')} />
+                        </>
+                      : isSchoolAdmin
+                        ? (Number(user.failedLoginAttempts) > 0 || user.lockedUntil)
+                          ? <button disabled={busy} onClick={() => doAction(() => request('post', `/users/${user.id}/unlock`), 'Account unlocked.')} className="rounded border border-slate-300 px-2 py-1.5 text-xs font-semibold disabled:opacity-50">{t('Unlock')}</button>
+                          : <span className="text-xs text-slate-500">—</span>
+                        : <span className="text-xs text-slate-500">{t('School account')}</span>}
+                  </td>
                 </tr>
               )
             })}</tbody>

@@ -58,7 +58,7 @@ export default function LeadershipResultsView() {
   useEffect(() => { loadDetails(selectedId) }, [selectedId])
 
   const approve = async () => {
-    if (!details || details.submission?.status !== 'submitted') return
+    if (!details || details.submission?.status !== 'awaiting_principal_approval' || !details.complete) return
     if (!window.confirm(t('Approve and lock these results with the official school stamp and principal signature?'))) return
     setBusy(true)
     try {
@@ -94,11 +94,11 @@ export default function LeadershipResultsView() {
             {details && <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4">
                 <div><h2 className="font-bold text-slate-900">{t(details.submission.gradeLevel)} · {t(details.submission.sectionName)}</h2><p className="mt-1 text-xs text-slate-500">{t(details.submission.semester)} · {details.submission.academicYear} · {details.students?.length || 0} {t('students')}</p></div>
-                {details.submission.status === 'submitted'
-                  ? <button type="button" disabled={busy} onClick={approve} className="inline-flex items-center gap-2 rounded-md bg-primary-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{busy ? t('Approving…') : t('Approve & Stamp')}</button>
+                {details.submission.status === 'awaiting_principal_approval'
+                  ? <button type="button" disabled={busy || !details.complete} onClick={approve} className="inline-flex items-center gap-2 rounded-md bg-primary-800 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-primary-900 disabled:cursor-not-allowed disabled:opacity-50"><CheckCircle2 className="h-5 w-5" />{busy ? t('Approving…') : t('Approve Results')}</button>
                   : <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-semibold text-success-700">{t(details.submission.status === 'published' ? 'Archived' : 'Approved and locked')}</span>}
               </div>
-              {details.submission.status !== 'submitted' && <div className="flex items-center justify-center gap-5 border-b border-slate-200 p-3 text-center">
+              {details.submission.status !== 'awaiting_principal_approval' && <div className="flex items-center justify-center gap-5 border-b border-slate-200 p-3 text-center">
                 {details.submission.stampPath && <img src={details.submission.stampPath} alt={t('Official school stamp')} className="h-16 max-w-32 object-contain" />}
                 {details.submission.signaturePath && <img src={details.submission.signaturePath} alt={t('Principal digital signature')} className="h-12 max-w-40 object-contain" />}
                 <span className="text-xs text-slate-600">{details.submission.principalName}</span>

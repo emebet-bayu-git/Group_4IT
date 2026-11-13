@@ -60,14 +60,14 @@ export default function AdvisorAggregationView() {
   useEffect(() => { loadResults(selectedId) }, [selectedId])
 
   const submitResults = async () => {
-    if (!results?.complete || results.submission) return
-    if (!window.confirm(t('Submit this section marksheet to the Registrar? Results will be locked for subject teachers.'))) return
+    if (!results?.readyToForward || results.submission) return
+    if (!window.confirm(t('Approve and forward this section marksheet to the Registrar? Results will be locked for subject teachers.'))) return
     setBusy(true)
     try {
       await axios.post(`/api/teacher/advisor/sections/${selectedId}/submit`, {}, authConfig())
       await loadSections()
       await loadResults(selectedId)
-      toast.success(t('Section results submitted to the Registrar.'))
+      toast.success(t('Section results submitted for principal approval.'))
     } catch (requestError) {
       toast.error(t(requestError.response?.data?.message || 'Unable to submit section results.'))
     } finally {
@@ -98,8 +98,8 @@ export default function AdvisorAggregationView() {
                 <div><h2 className="font-bold text-slate-900">{currentSection ? `${t(currentSection.gradeLevel)} · ${t(currentSection.sectionName)}` : ''}</h2><p className="mt-1 text-xs text-slate-500">{results.students.length} {t('students')} · {results.subjects.length} {t('subject assignments')}</p><p className="mt-1 text-xs text-slate-600">{t('Homeroom Teacher')}: {results.section?.homeroomTeacherName || t('Unassigned')}</p></div>
                 <div className="flex items-center gap-2">
                   {results.submission
-                    ? <span className="rounded-full bg-success-50 px-3 py-1 text-xs font-semibold text-success-700">{t(results.submission.status === 'published' ? 'Permanently archived' : results.submission.status === 'approved' ? 'Principal approved and locked' : 'Submitted for principal approval')}</span>
-                    : <button type="button" disabled={!results.complete || busy} onClick={submitResults} className="inline-flex items-center gap-2 rounded-md bg-primary-800 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-4 w-4" />{busy ? t('Submitting…') : t('Review & Send to Registrar')}</button>}
+                    ? <span className={`rounded-full px-3 py-1 text-xs font-semibold ${results.submission.status === 'awaiting_principal_approval' ? 'bg-warning-50 text-warning-800' : 'bg-success-50 text-success-700'}`}>{t(results.submission.status === 'published' ? 'Permanently archived' : results.submission.status === 'approved' ? 'Principal approved and locked' : 'awaiting_principal_approval')}</span>
+                    : <button type="button" disabled={!results.readyToForward || busy} onClick={submitResults} className="inline-flex items-center gap-2 rounded-md bg-primary-800 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-4 w-4" />{busy ? t('Submitting…') : t('Approve & Forward to Registrar')}</button>}
                 </div>
               </div>
               <div className="grid gap-3 border-b border-slate-200 p-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -108,6 +108,9 @@ export default function AdvisorAggregationView() {
                   <p className="mt-1 text-xs text-slate-600">{t('Teacher')}: {subject.teacherName}</p>
                   <p className={`mt-2 text-xs font-semibold ${subject.complete ? 'text-success-700' : 'text-warning-700'}`}>
                     {subject.complete ? t('Complete') : t('Pending')} · {subject.gradedCount}/{subject.studentCount} {t('students')}
+                  </p>
+                  <p className={`mt-1 text-xs font-semibold ${subject.submittedToHomeroom ? 'text-success-700' : 'text-warning-700'}`}>
+                    {t(subject.submittedToHomeroom ? 'Submitted to Homeroom' : 'Awaiting subject teacher submission')}
                   </p>
                 </div>)}
                 {!results.subjects.length && <p className="text-sm text-slate-600">{t('No subject-teacher assignments exist for this section.')}</p>}

@@ -16,6 +16,9 @@ import MainLayout from './components/MainLayout.jsx'
 import { AcademicProvider } from './contexts/AcademicContext.jsx'
 import { I18nProvider } from './i18n/I18nContext.jsx'
 import { Toaster } from 'react-hot-toast'
+import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
+
+const toastClassName = 'flex items-center gap-2 rounded-lg border px-4 py-3 shadow-md'
 
 const publicPaths = {
   home: '/',
@@ -125,12 +128,12 @@ export default function App() {
         toastOptions={{
           duration: 4000,
           success: {
-            style: { background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' },
-            iconTheme: { primary: '#059669', secondary: '#ecfdf5' },
+            className: `${toastClassName} bg-emerald-50 border-emerald-200 text-emerald-800`,
+            icon: <CheckCircle className="h-5 w-5 shrink-0 text-emerald-600" />,
           },
           error: {
-            style: { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
-            iconTheme: { primary: '#dc2626', secondary: '#fef2f2' },
+            className: `${toastClassName} bg-red-50 border-red-200 text-red-800`,
+            icon: <XCircle className="h-5 w-5 shrink-0 text-red-600" />,
           },
         }}
       />
